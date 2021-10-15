@@ -1,0 +1,7 @@
+#!/bin/sh
+cd ~/Documents/Papers/MLBasics
+
+atril DeepLearningBook.pdf &
+clear
+nano dlnotes
+

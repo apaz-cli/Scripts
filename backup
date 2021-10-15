@@ -1,0 +1,41 @@
+#!/usr/bin/bash
+
+cd ~
+
+# Add directories to back up as plaintext
+yadm add Scripts/ Screenshots/
+
+# Add directories to ack up encrypted.
+# The resulting dump is tracked by lfs in .gitattributes.
+yadm encrypt
+yadm add .config/yadm/encrypt
+yadm add .local/share/yadm/archive
+
+# Back up dotfiles
+# Xfce dotfiles
+yadm add .config/xfce4
+# VSCode
+yadm add .config/Code/User/settings.json
+yadm add .config/Code/User/keybindings.json
+
+
+# Show status
+yadm status
+
+# Fix permissions because yadm screws them.
+# Do this after status because it takes time to read.
+chmod 0755 Documents/ Pictures/
+# Drop into python to fix subfolders and files recursively
+python3 -c "import stat as s;from os import chmod;from os.path import isfile, isdir;from glob import glob;h = '/home/apaz/';a = glob(h+'Documents/**', recursive=True)+glob(h+'Pictures/**', recursive=True);c=s.S_IRGRP|s.S_IROTH;[chmod(f,s.S_IRWXU|s.S_IXGRP|s.S_IXOTH|c) for f in a if isdir(f)];[chmod(f,s.S_IRUSR|s.S_IWUSR|c) for f in a if isfile(f)];"
+
+
+# Ask the user if they would like to continue.
+read -p "Would you like to commit and push? [y/N]: " -n 1 -r
+echo #newline
+if [[ ! $REPLY =~ ^[Yy]$ ]]
+then
+    exit 0
+fi
+
+yadm commit -m 'Backed up dotfiles and folders.'
+yadm push

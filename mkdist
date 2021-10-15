@@ -1,0 +1,314 @@
+#!/usr/bin/env bash
+
+##########
+# KERNEL #
+##########
+
+# Add Liquorix repo
+sudo apt-get update
+sudo apt-get install -y curl
+curl 'https://liquorix.net/add-liquorix-repo.sh' | sudo bash
+sudo apt-get -y upgrade
+
+# Install Custom Kernel
+#sudo apt-get install -y linux-image-liquorix-amd64 linux-headers-liquorix-amd64
+
+
+############
+# PACKAGES #
+############
+
+# Software that I actually use
+sudo apt-get update
+sudo apt-get install -y thunar gimp parole mousepad deluge libreoffice
+sudo apt-get install -y xfce4-battery-plugin xfce4-taskmanager xfce4-cpugraph-plugin xfce4-cpufreq-plugin xfce4-clipman-plugin xfce4-datetime-plugin xfce4-diskperf-plugin xfce4-fsguard-plugin xfce4-genmon-plugin xfce4-mount-plugin xfce4-places-plugin xfce4-sensors-plugin xfce4-systemload-plugin xfce4-timer-plugin xfce4-verve-plugin xfce4-weather-plugin xfce4-netload-plugin xfce4-whiskermenu-plugin thunar-archive-plugin thunar-media-tags-plugin xfce4-notifyd
+sudo apt-get install -y neofetch ffmpeg unzip locate scrot tar gzip font-manager
+sudo apt-get install -y git git-lfs yadm
+sudo apt-get install -y default-jdk python3-pip
+sudo apt-get install -y exfat-utils exfat-fuse
+sudo apt-get install -y graphicsmagick-imagemagick-compat fonts-noto-color-emoji
+
+
+################
+# SYSTEM FIXES #
+################
+
+# Disable sudo password
+echo -e 'Defaults\tenv_reset\nDefaults\tmail_badpass\nDefaults\tsecure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"\n\n# User privilege specification\nroot\tALL=(ALL:ALL) ALL\n\n# Allow members of group sudo to execute any command\n%sudo\tALL=(ALL:ALL) ALL\n\n# Disable password requirement\napaz\tALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers >/dev/null
+echo "Disabled sudo password."
+
+# Disable hardware beep
+echo "blacklist pcspkr" | sudo tee /etc/modprobe.d/nobeep.conf >/dev/null
+echo "Disabled hardware beep."
+
+# Thunar webp support
+echo -e '[Thumbnailer Entry]\nVersion=1.0\nEncoding=UTF-8\nType=X-Thumbnailer\nName=webp Thumbnailer\nMimeType=image/webp;\nExec=/usr/bin/convert -thumbnail %s %i %o' | sudo tee /usr/share/thumbnailers/webp.thumbnailer >/dev/null
+echo "Added webp support to Thunar."
+
+# Replace the default XFCE panel blank icon and overwrite the audio icons.
+#cd ~
+#sudo updatedb
+#echo -e '<?xml version="1.0" encoding="UTF-8" standalone="no"?><svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 500 500" width="500" height="500" id="starter_svg"></svg>' | tee Blank_button.svg >/dev/null
+#for LEVEL in muted low medium high
+# do
+#  #echo $LEVEL
+#  for FILE in $(locate 'audio-volume-'$LEVEL'-symbolic.svg')
+#   do sudo cp Blank_button.svg $FILE
+#  done
+# done
+#rm Blank_button.svg
+#echo "Overwrote PulseAudio plugin icons."
+
+# Fix Scroll speed
+#sudo apt-get install -y imwheel
+#echo -e '".*"\nNone,      Up,   Button4, 3\nNone,      Down, Button5, 3\nControl_L, Up,   Control_L|Button4\nControl_L, Down, Control_L|Button5\nShift_L,   Up,   Shift_L|Button4\nShift_L,   Down, Shift_L|Button5' | tee #~/.imwheelrc >/dev/null
+#echo -e '!/usr/bin/env bash\nimwheel --kill --buttons "4 5"' | sudo tee /etc/init.d/scrollspeed >/dev/null
+#sudo chmod +x /etc/init.d/scrollspeed
+#echo "Scroll speed set."
+
+# Greeter
+echo -e 'background=/home/apaz/Pictures/Icons-Resources/Greeter_Wall.png\ndefault-user-image=/home/apaz/Pictures/Icons-Resources/PFP.jpg\nicon-theme-name=Tango\nindicators = ~clock;~power\nfont-name= Nimbus Mono L Bold' | sudo tee -a /etc/lightdm/lightdm-gtk-greeter.conf >/dev/null
+
+##################
+# HELPER SCRIPTS #
+##################
+
+# YTDL
+cd ~
+sudo curl -L https://yt-dl.org/downloads/latest/youtube-dl -o /bin/ytdl
+sudo chmod a+rx /bin/ytdl
+ytdl --update
+echo "Installed Youtube-dl."
+
+
+##########
+# THEMES #
+##########
+
+# Simple Dark XFCE Theme
+cd /usr/share/themes
+sudo curl -sL https://cdn.discordapp.com/attachments/472924293593038858/709656417187135550/Xfce-Simple-Dark.tar.gz -o /usr/share/themes/Xfce-Simple-Dark.tar.gz
+sudo tar -xvzf Xfce-Simple-Dark.tar.gz
+sudo rm Xfce-Simple-Dark.zip
+
+# Border-Only xfwm4 theme
+cd /usr/share/themes
+sudo curl -sL https://cdn.discordapp.com/attachments/472924293593038858/709656435046481930/border-only.tar.gz -o /usr/share/themes/border-only.tar.gz
+sudo tar -xvzf border-only.tar.gz
+sudo rm border-only.tar.gz
+
+# Tela-Brown icon theme
+cd ~/.icons
+curl -sL https://cdn.discordapp.com/attachments/472924293593038858/818738535472824320/Tela-brown.tar.gz -o ~/.icons/Tela-brown.tar.gz
+tar -xvzf Tela-brown.tar.gz
+mv Tela-brown/Tela-brown Tela-Temp
+mv Tela-brown/Tela-brown-dark/ Tela-brown-dark
+rmdir Tela-brown
+mv Tela-Temp Tela-brown
+rm Tela-brown.tar.gz
+echo "Installed Simple-Dark xfce4 theme, Border-Only xfwm4 theme, and Tela-brown gtk-icon themes."
+
+# Lemon font
+cd ~
+curl -sL https://github.com/fennerm/artwiz-lemon-ttf/raw/master/lemon.ttf -o lemon.ttf
+font-manager -i lemon.ttf
+rm lemon.ttf
+
+####################
+# INSTALL SOFTWARE #
+####################
+
+# Vivaldi
+cd ~
+curl -sL https://downloads.vivaldi.com/stable/vivaldi-stable_3.6.2165.40-1_amd64.deb -o vivaldi.deb
+sudo dpkg -i vivaldi.deb
+rm vivaldi.deb
+echo "Installed Vivaldi."
+# Script to apply Vivaldi CSS Patch.
+echo "Patched Vivaldi CSS."
+
+# Ungoogled Chromium
+#echo 'deb http://download.opensuse.org/repositories/home:/ungoogled_chromium/Debian_Buster/ /' | sudo tee /etc/apt/sources.list.d/home:ungoogled_chromium.list >/dev/null
+#curl -fsSL https://download.opensuse.org/repositories/home:ungoogled_chromium/Debian_Buster/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/home:ungoogled_chromium.gpg >/dev/null
+#sudo apt update
+#sudo apt install ungoogled-chromium
+#echo "Installed Ungoogled Chromium."
+
+# Spotify
+#cd ~
+#curl -sS https://download.spotify.com/debian/pubkey_0D811D58.gpg | sudo apt-key add - 
+#echo "deb http://repository.spotify.com stable non-free" | sudo tee /etc/apt/sources.list.d/spotify.list >/dev/null
+#sudo apt-get update && sudo apt-get install spotify-client
+#echo "Installed Spotify."
+
+# Discord
+cd ~
+curl -sL 'https://discordapp.com/api/download?platform=linux&format=deb' -o discord.deb
+sudo dpkg -i discord.deb
+sudo apt-get --fix-broken -y install
+rm discord.deb
+# BetterDiscord
+curl -O https://raw.githubusercontent.com/bb010g/betterdiscordctl/master/betterdiscordctl
+chmod +x betterdiscordctl
+sudo mv betterdiscordctl /usr/local/bin
+betterdiscordctl install
+echo "Installed Discord and BetterDiscord."
+
+# qView
+cd ~
+curl -sL https://github.com/jurplel/qView/releases/download/3.0/qview_3.0-2_amd64.deb -o qview.deb
+sudo dpkg -i qview.deb
+rm qview.deb
+sudo apt-get --fix-broken -y install
+echo "Installed qview."
+
+
+#########
+# GAMES #
+#########
+
+# Install Steam
+cd ~
+curl -sL 'https://steamcdn-a.akamaihd.net/client/installer/steam.deb' -o steam.deb
+sudo dpkg -i steam.deb
+rm steam.deb
+sudo apt-get --fix-broken -y install
+echo "Installed Steam."
+
+# Minecraft
+#cd ~
+#wget https://launcher.mojang.com/download/Minecraft.deb
+#sudo dpkg -i Minecraft.deb
+#rm Minecraft.deb
+
+# Install Lutris
+cd ~
+echo "deb http://download.opensuse.org/repositories/home:/strycore/Debian_10/ ./" | sudo tee /etc/apt/sources.list.d/lutris.list >/dev/null
+wget -q https://download.opensuse.org/repositories/home:/strycore/Debian_10/Release.key -O- | sudo apt-key add -
+#sudo apt-get update
+#sudo apt-get install lutris
+#echo "Installed Lutris."
+# Install MTGO
+#curl -L https://lutris.net/api/installers/magic-the-gathering-arena-latest-self-updating?format=json -o mtga.json
+#lutris -i mtga.json
+#rm mtga.json
+#echo "Opened MTGA installer."
+
+# Install MTGO Docker
+#cd ~
+#sudo apt-get install -y docker.io
+#wget -O run-mtgo https://raw.githubusercontent.com/pauleve/docker-mtgo/master/run-mtgo
+#chmod +x run-mtgo
+#sudo mv run-mtgo Scripts/run-mtgo
+
+
+###############
+# DEVELOPMENT #
+###############
+
+# Eclipse
+cd ~
+curl -sL 'http://ftp.osuosl.org/pub/eclipse/technology/epp/downloads/release/2019-12/R/eclipse-jee-2019-12-R-linux-gtk-x86_64.tar.gz' -o eclipse.tar.gz
+sudo mv eclipse.tar.gz /var/lib/eclipse.tar.gz
+cd /var/lib
+sudo tar -xvzf /var/lib/eclipse.tar.gz
+sudo mv eclipse/eclipse eclipse/eclipselauncher
+sudo rm eclipse.tar.gz
+cd /bin
+sudo touch eclipse
+echo -e '#!/usr/bin/env bash\ncd /var/lib/eclipse\n./eclipselauncher' | sudo tee eclipse >/dev/null
+sudo chmod +x eclipse
+# Create .desktop file
+echo -e '[Desktop Entry]\nName=Eclipse\nComment=The Superior Java IDE.\nExec=eclipse\nIcon=/var/lib/eclipse/icon.xpm\nCategories=TextEditor;Development;IDE;Java\nType=Application\nTerminal=0\nKeywords=Java;Eclipse' | sudo tee /usr/share/applications/Eclipse.desktop >/dev/null
+echo "Installed Eclipse."
+
+# VSCode
+cd ~
+curl -L https://update.code.visualstudio.com/latest/linux-deb-x64/stable -o code.deb
+sudo dkpg -i code.deb
+rm code.deb
+sudo chown -R $(whoami) ~/.config/Code
+sudo chown -R $(whoami) /usr/share/code
+echo "Installed VSCode."
+code --install-extension ms-vscode.cpptools
+code --install-extension ms-python.python
+code --install-extension ms-toolsai.jupyter
+code --install-extension be5invis.vscode-custom-css
+code --install-extension coenraads.bracket-pair-colorizer-2
+code --install-extension tht13.html-preview-vscode
+code --install-extension tomoki1207.pdf
+code --install-extension yzhang.markdown-all-in-one
+code --install-extension vscode-icons-team.vscode-icons
+sudo chown -R $(whoami) ~/.config/Code
+sudo chown -R $(whoami) /usr/share/code
+echo "Installed VSCode extensions."
+
+# Theme
+#echo LyoqdnNjb2RlX3N0eWxlLmNzcyovCmJvZHl7CiAgIHBvaW50ZXItZXZlbnRzOiBhdXRvICFpbXBvcnRhbnQ7CiAgIGJhY2tncm91bmQtc2l6ZTogMTAwJSAhaW1wb3J0YW50OwogICBvcGFjaXR5OiAwLjk3ICFpbXBvcnRhbnQ7CiAgIGJhY2tncm91bmQtcG9zaXRpb246IDAgMCAhaW1wb3J0YW50OwogICAvKipjaGFuZ2UgeW91ciBpbWFnZSB1cmwgaGVyZSovCiAgIGJhY2tncm91bmQtaW1hZ2U6IHVybCgnZmlsZTovLy9ob21lL2FwYXovUGljdHVyZXMvSWNvbnMtUmVzb3VyY2VzL1ZTQ29kZV9CRy5qcGcnKTsKICAgY29udGVudDogJyc7CiAgIHBvc2l0aW9uOiBhYnNvbHV0ZTs7CiAgIHotaW5kZXg6IDk5OTsKICAgd2lkdGg6IDEwMCU7CiAgIGJhY2tncm91bmQtcmVwZWF0OiBuby1yZXBlYXQ7Cn0KCg== | base64 -d > /home/apaz/.vscode/vscode_style.css
+# ~/.vscode/extensions/be5invis.vscode-custom-css-5.0.2/vscode_style.css
+# ~/.vscode/extensions/be5invis.vscode-custom-css-5.0.2/staging_dir
+# Chown
+
+
+# Jupyter Notebooks
+yes | pip3 install jupyter
+yes | pip3 install jupyterthemes
+
+# Jupyter themes
+# (Adding ~/.local/bin (And therefore jt) to $PATH is handled in ~/Scripts/pathfix, which should have already been run before mkdist.)
+jt -t monokai -f fira -fs 13 -nf ptsans -nfs 11 -N -kl -cursw 5 -cursc r -cellw 95% -T
+echo "from jupyterthemes import jtplot; jtplot.style(theme='monokai', context='notebook', ticks=True, grid=False);" | sudo tee ~/.ipython/profile_default/startup/50_startup.py >/dev/null
+echo "Installed Jupyter Notebooks."
+
+# Clean up packages
+sudo apt-get install -y --fix-broken
+sudo apt-get purge   -y firefox* firefox-esr*
+sudo apt-get purge   -y libreoffice-draw libreoffice-math evince
+sudo apt-get purge   -y synaptic quodlibet xsane hv3* xfburn ristretto xfce4-weather-plugin xfce4-dict xfce4-screenshooter
+sudo apt-get purge   -y gnome-accessibility-themes
+fup
+
+#Set panel:
+#	Deskbar
+#	Lock panel
+#	Hide Never
+#	Row size: 64
+#	Length 100%
+#
+#	Solid color #405E8F
+#	Alpha 0
+#	Enter 100
+#	Leave 100
+#
+#	Applications Menu
+#	Launcher Thunar
+#	Launcher Chromium
+#	Launcher VSCode
+#	Launcher Spotify
+#	Launcher Discord
+#	Launcher xfce4-terminal
+#	Launcher Steam
+#	Launcher mail
+#	Launcher TODO
+#	Separator
+#	PulseAudio Plugin
+#	DateTime:
+#		Time, then date
+#		Caldea Bold 14
+#		%m/%d/%y
+#		Caldea Bold 14
+#		%l:%M %S
+#	System Load Monitor:
+#		3.0
+#		5
+#		on, #0000C0
+#		on, #00C000
+#		off
+#		off
+#	Workspace Switcher
+#
+#
+#Log into Steam
+#Log into Spotify
+#Log into Chromium, sync extensions, set DuckDuckGo as browser
+

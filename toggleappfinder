@@ -1,0 +1,9 @@
+#!/usr/bin/bash
+
+PID="$(pgrep xfce4-appfinder)"
+
+if [ "$PID" == '' ]; then
+    xfce4-appfinder --disable-server
+  else
+    kill $PID
+fi

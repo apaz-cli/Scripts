@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+if [ -z "$1" ]
+  then
+    echo Please specify a file to compress.
+fi
+
+if [ -z "$2" ]
+  then
+    fname=${1}.tar.gz
+    tar -czvf $fname $1
+  else
+    tar -czvf $2 $1
+fi
+

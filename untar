@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+if [ -z "$1" ]
+  then
+    echo Please specify a tar.gz archive to decompress.
+fi
+
+if [[ $1 != *.tar.gz ]]
+  then
+    echo Expected the first argument to be a tar.gz file. Got: $1
+fi
+
+if [ -z "$2" ]
+  then
+    tar -xzvf $1
+  else
+    tar -xzvf $1 --directory=$2
+fi
+

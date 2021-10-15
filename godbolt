@@ -1,0 +1,8 @@
+#!/bin/sh
+RED='\033[1;31m'
+NC='\033[0m'
+if [ ! -f "$1" ]; then
+	echo "${RED}Please provide an input file.${NC}"
+	exit 1
+fi
+gcc -E -P $1 | xclip -selection clipboard && vivaldi https://godbolt.org &

@@ -1,0 +1,50 @@
+#!/usr/bin/python3
+
+import os
+import sys
+import shutil
+import subprocess
+from shlex import split
+from os import chdir as cd
+from glob import glob
+
+def run(s, end=os.linesep):
+  subprocess.run(split(s), check=True)
+
+if not len(sys.argv) > 1:
+  print('Please provide a markdown file to convert.')
+  exit(1)
+
+_from = sys.argv[1]
+_title =  os.path.splitext(_from)[0]+'.html'
+_to = None
+
+if len(sys.argv) > 2:
+  _to = sys.argv[2]
+else:
+  _to = _title
+
+css = """<style type="text/css">
+body {
+    margin: auto;
+    padding-right: 1em;
+    padding-left: 1em;
+    max-width: 44em;
+    border-left: 1px solid black;
+    border-right: 1px solid black;
+    color: black;
+    font-family: Verdana, sans-serif;
+    font-size: 100%;
+    line-height: 140%;
+    color: #333;
+}
+</style>
+"""
+
+with open("pandoc.css", "w+") as f:
+	f.write(css)
+
+run(f'pandoc -s --self-contained --toc --metadata pagetitle="{_title}" -H pandoc.css -fmarkdown -thtml {_from} -o {_to}')
+
+run('rm pandoc.css')
+

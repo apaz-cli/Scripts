@@ -1,0 +1,21 @@
+#!/usr/bin/bash
+cd ~/Screenshots/
+makeglob="import glob;g=glob.glob('/home/apaz/Screenshots/*.png')"
+#stripglob="g=''.join([c for c in str(g) if not c in ['\n',' ']])"
+printglob="$makeglob;print(str(g).replace(', ',','))"
+#[print('\"',l,'\"', sep='') for l in g]"
+tmp1=$(python -c "$printglob")
+echo tmp1 $tmp1
+
+#clear
+neofetch
+scrot -d 5
+
+tmp2=$(python -c "$printglob")
+echo tmp2 $tmp2
+name=$(python -c "l=[i for i in eval($tmp1) if not i in $tmp2];print(l);a=(print(l[0], end='') if len(l) else print('NOT_FOUND', end=''))")
+echo $name
+
+if [[ $name != 'NOT_FOUND' ]]; then 
+  gimp $name
+fi
