@@ -52,7 +52,7 @@ if ! shopt -oq posix; then
   fi
 fi
 
-export PATH="/home/apaz/Scripts:$PATH:/home/apaz/.local/bin"
+export PATH="/home/apaz/git/system/Scripts:$PATH:/home/apaz/.local/bin"
 
 
 case "$TERM" in
