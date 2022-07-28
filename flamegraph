@@ -1,0 +1,20 @@
+#!/bin/sh
+
+if [ ! -d "/bin/FlameGraph" ]; then
+  WD="$(pwd)"
+  cd /tmp/
+  git clone --depth=1 https://github.com/brendangregg/FlameGraph
+  sudo mv FlameGraph/ /bin/FlameGraph/
+  echo "Flamegraph installed."
+  cd "$WD"
+fi
+
+title="$@"
+perf record -F 15500 -g --call-graph dwarf $@ 2>/dev/null
+sudo mv perf.data /bin/FlameGraph/perf.data
+sudo chmod +rw /bin/FlameGraph/perf.data
+cd /bin/FlameGraph/
+perf script | ./stackcollapse-perf.pl > /tmp/out.perf-folded
+./flamegraph.pl --title="$title" /tmp/out.perf-folded > /tmp/perf.svg
+
+firefox /tmp/perf.svg

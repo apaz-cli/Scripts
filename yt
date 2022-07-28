@@ -1,3 +1,4 @@
 #!/bin/bash
 cd '/home/apaz/Videos/'
 ytdl $@
+kill -9 $PPID
