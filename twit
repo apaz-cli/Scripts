@@ -1,13 +1,15 @@
 #!/bin/sh
 
+# USAGE:
+# twit "https://pbs.twimg.com/media/ExpJmb1UYAAouLF?format=jpg&name=large"
+
+
 URL="$1"
 LAST=$(echo "$URL"  | rev | cut -d/ -f1 | rev)
-if [ -z "$LAST" ]; then echo "Could not parse the URL." 1>&2 && exit 1; fi
+if [ -z "$LAST" ]; then echo "Could not parse the URL's query." 1>&2 && exit 1; fi
 NAME=$(echo "$LAST" | cut -d? -f1)
-if [ -z "$NAME" ]; then echo "Could not parse the URL." 1>&2 && exit 1; fi
-FMT=$(echo  "$LAST" | cut -d? -f2 | cut -d'&' -f1 | cut -d= -f2)
-if [ -z "$NAME" ]; then echo "Could not parse the URL." 1>&2 && exit 1; fi
+if [ -z "$NAME" ]; then echo "Could not parse the URL's file name." 1>&2 && exit 1; fi
+FMT=$(echo  "$FMT" | cut -d? -f2 | cut -d'&' -f1 | cut -d= -f2)
+if [ -z "$NAME" ]; then echo "Could not parse the URL's file extension." 1>&2 && exit 1; fi
 
 wget -q -O "$NAME.$FMT" "$URL"
-
-#https://pbs.twimg.com/media/ExpJmb1UYAAouLF?format=jpg&name=large
