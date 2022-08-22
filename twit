@@ -10,6 +10,6 @@ if [ -z "$LAST" ]; then echo "Could not parse the URL's query." 1>&2 && exit 1; 
 NAME=$(echo "$LAST" | cut -d? -f1)
 if [ -z "$NAME" ]; then echo "Could not parse the URL's file name." 1>&2 && exit 1; fi
 FMT=$(echo  "$FMT" | cut -d? -f2 | cut -d'&' -f1 | cut -d= -f2)
-if [ -z "$NAME" ]; then echo "Could not parse the URL's file extension." 1>&2 && exit 1; fi
+if [ -z "$FMT" ]; then echo "Could not parse the URL's file extension." 1>&2 && exit 1; fi
 
 wget -q -O "$NAME.$FMT" "$URL"

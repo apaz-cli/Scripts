@@ -1,1 +1,2 @@
+#!/bin/sh
 ssh apaz-cli@antarctic.juliacomputing.io

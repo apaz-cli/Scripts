@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 killall steam
 killall lutris
 killall MTGA.exe
