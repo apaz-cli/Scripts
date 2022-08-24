@@ -52,11 +52,10 @@ if ! shopt -oq posix; then
   fi
 fi
 
-export PATH="/home/apaz/git/system/Scripts:$PATH:/home/apaz/.local/bin"
-
+export PATH="/home/$USER/git/system/Scripts:$PATH:/home/$USER/.local/bin"
 
 case "$TERM" in
-xterm*|rxvt*|screen)
+xterm*|rxvt*|screen)q
     GREENISH="\[\033[32m\]"
     BLUISH="\[\033[94m\]"
     CYANISH="\[\033[96m\]"
