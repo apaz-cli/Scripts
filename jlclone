@@ -1,0 +1,56 @@
+#!/bin/sh
+
+USAGE="USAGE: clone-julia <folder-branch-name> <command>? <[apaz]|julia>?"
+
+if [ -z "$1" ]; then
+  echo "$USAGE"
+  exit 1
+fi
+
+if [ "$#" = "2" ]; then
+  if [ "$2" = "apaz" ]; then
+    FROM="$2"
+  elif; then
+    FROM="$2"
+  else
+    FROM=""
+  fi
+else
+FROM="$3"
+fi
+
+URL="https://github.com/apaz-cli/julia"
+REMOTE="https://github.com/julialang/julia"
+if [ -z "$FROM" ]; then
+  if   [ "$FROM" = ""  ]; then :;
+  elif [ "$FROM" = "apaz" ]; then :;
+  elif [ "$FROM" = "julia" ]; then
+    TMP="$URL"
+    FROM="$URL"
+    URL="$TMP"
+  else
+    echo "$USAGE"
+    exit 1
+  fi
+fi
+BRANCH="ap/$1"
+FOLDER="/home/apaz/jl/$1"
+
+echo "$FROM"
+echo "$URL"
+echo "$BRANCH"
+echo "$FOLDER"
+
+
+
+#cd "$FOLDER/.."
+#git clone "$URL" "$FOLDER"
+#cd "$FOLDER"
+#git branch "$BRANCH"
+#git checkout "$BRANCH"
+#git remote add julia "$REMOTE"
+
+cd "/home/apaz/jl/julia/"
+git worktree add "../$FOLDER" "$BRANCH"
+
+

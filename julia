@@ -1,2 +1,2 @@
 #!/bin/sh
-exec ~/git/julia/julia $@
+exec ~/jl/julia/julia $@

@@ -1,0 +1,2 @@
+#!/bin/sh
+xdg-open https://docs.julialang.org/en/v1

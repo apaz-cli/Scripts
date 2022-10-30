@@ -1,0 +1,2 @@
+#!/bin/sh
+xterm -e ssh julia@arctic1.juliacomputing.io -p 3300

@@ -1,19 +1,17 @@
 #!/bin/sh
 
-SAMPLERATE="128k"
-AUDIORATE="44100"
 
 if [ "$1" = "all" ]; then
   for FILE in *.webm; do
     BASENAME="${FILE%.webm}"
-    NEWNAME="$BASENAME.mp3"
+    NEWNAME="$BASENAME.mp4"
     echo "$FILE"
     if [ "$FILE" = "$BASENAME" ]; then echo "Can only convert \".webm\" files."; exit 1; fi
 
     if [ "$2" = "threaded" ]; then
-      ffmpeg -i "$FILE" -vn -ab "$SAMPLERATE" -ar "$AUDIORATE" -y "$NEWNAME" 2>/dev/null &
+      ffmpeg -i "$FILE" -c copy "$NEWNAME" 2>/dev/null &
     else
-      ffmpeg -i "$FILE" -vn -ab "$SAMPLERATE" -ar "$AUDIORATE" -y "$NEWNAME" 2>/dev/null
+      ffmpeg -i "$FILE" -c copy "$NEWNAME" 2>/dev/null
     fi
   done
   exit 0
@@ -21,7 +19,7 @@ fi
 
 FILE="$1"
 BASENAME="${FILE%.webm}"
-NEWNAME="$BASENAME.mp3"
+NEWNAME="$BASENAME.mp4"
 if [ "$FILE" = "$BASENAME" ]; then echo "Can only convert \".webm\" files."; exit 1; fi
 
-ffmpeg -i "$FILE" -vn -ab "$SAMPLERATE" -ar "$AUDIORATE" -y "$NEWNAME" 2>/dev/null
+ffmpeg -i "$FILE" -c copy "$NEWNAME" 2>/dev/null

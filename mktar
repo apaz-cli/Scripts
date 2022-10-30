@@ -6,9 +6,9 @@ fi
 
 if [ -z "$2" ]
   then
-    fname=${1}.tar.gz
-    tar -czvf $fname $1
+    fname="${1}.tar.gz"
+    tar -czvf "$fname" "$1"
   else
-    tar -czvf $2 $1
+    tar -czvf "$2" "$1"
 fi
 
