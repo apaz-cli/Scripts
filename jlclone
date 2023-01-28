@@ -1,56 +1,50 @@
 #!/bin/sh
 
-USAGE="USAGE: clone-julia <folder-branch-name> <command>? <[apaz]|julia>?"
+USAGE="USAGE: jlclone <folder-branch-name> <[apaz]|julia>?"
 
 if [ -z "$1" ]; then
   echo "$USAGE"
   exit 1
 fi
 
-if [ "$#" = "2" ]; then
-  if [ "$2" = "apaz" ]; then
-    FROM="$2"
-  elif; then
-    FROM="$2"
-  else
-    FROM=""
-  fi
-else
-FROM="$3"
-fi
-
-URL="https://github.com/apaz-cli/julia"
-REMOTE="https://github.com/julialang/julia"
-if [ -z "$FROM" ]; then
-  if   [ "$FROM" = ""  ]; then :;
-  elif [ "$FROM" = "apaz" ]; then :;
-  elif [ "$FROM" = "julia" ]; then
-    TMP="$URL"
-    FROM="$URL"
-    URL="$TMP"
-  else
-    echo "$USAGE"
-    exit 1
-  fi
-fi
+NAME="$1"
 BRANCH="ap/$1"
 FOLDER="/home/apaz/jl/$1"
-
-echo "$FROM"
-echo "$URL"
-echo "$BRANCH"
-echo "$FOLDER"
-
-
-
-#cd "$FOLDER/.."
-#git clone "$URL" "$FOLDER"
-#cd "$FOLDER"
-#git branch "$BRANCH"
-#git checkout "$BRANCH"
-#git remote add julia "$REMOTE"
+FROM="apaz"
+if [ "$2" = "apaz" ]; then
+  FROM="apaz"
+elif [ "$2" = "julia" ]; then
+  FROM="julia"
+fi
 
 cd "/home/apaz/jl/julia/"
-git worktree add "../$FOLDER" "$BRANCH"
+git branch "$BRANCH" 2>/dev/null
+git worktree add "$FOLDER" "$BRANCH"
+if [ "$?" -eq 0 ]; then :;
+else
+  echo "The branch already exists."
+  exit 1
+fi
 
+cd "$FOLDER"
+if   [ "$FROM" = "apaz" ]; then :;
+  git remote add julia "https://github.com/julialang/julia"
+elif [ "$FROM" = "julia" ]; then
+  git remote add apaz  "https://github.com/apaz-cli/julia"
+else
+  echo "$USAGE"
+  exit 1
+fi
 
+# Set up Make.user
+echo "FORCE_ASSERTIONS=1" > Make.user
+echo "LLVM_ASSERTIONS=1" >> Make.user
+
+# Set up mingw build folders
+make configure O="julia-win32"
+echo "XC_HOST=i686-w64-mingw32" > julia-win32/Make.user
+make configure O="julia-win64"
+echo "XC_HOST=x86_64-w64-mingw32" > julia-win64/Make.user
+
+# Link the srccache
+ln -s ~/jl/julia/deps/srccache deps/srccache

@@ -1,8 +1,0 @@
-#!/bin/sh
-
-if [ -z "$1" ]; then
-  echo "Please supply an argument to grep for." >/dev/stderr
-  exit 1
-fi
-
-grep -r --exclude="**/.git" "$@" 2>&1 | grep -v "binary file matches" | grep -v "\.md" | grep -v "\.html"

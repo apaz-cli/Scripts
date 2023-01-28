@@ -23,11 +23,13 @@ sudo apt-get update
 sudo apt-get install -y thunar gimp parole mousepad deluge libreoffice
 sudo apt-get install -y xfce4-battery-plugin xfce4-taskmanager xfce4-cpugraph-plugin xfce4-cpufreq-plugin xfce4-clipman-plugin xfce4-datetime-plugin xfce4-diskperf-plugin xfce4-fsguard-plugin xfce4-genmon-plugin xfce4-mount-plugin xfce4-places-plugin xfce4-sensors-plugin xfce4-systemload-plugin xfce4-timer-plugin xfce4-verve-plugin xfce4-weather-plugin xfce4-netload-plugin xfce4-whiskermenu-plugin thunar-archive-plugin thunar-media-tags-plugin xfce4-notifyd
 sudo apt-get install -y neofetch ffmpeg unzip locate scrot tar gzip font-manager
-sudo apt-get install -y git git-lfs yadm
+sudo apt-get install -y git git-lfs
 sudo apt-get install -y default-jdk python3-pip
 sudo apt-get install -y exfat-utils exfat-fuse
 sudo apt-get install -y graphicsmagick-imagemagick-compat fonts-noto-color-emoji
 
+# Other useful:
+# obs-studio nitrogen yadm
 
 ################
 # SYSTEM FIXES #

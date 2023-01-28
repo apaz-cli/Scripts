@@ -12,19 +12,15 @@ esac
 # See bash(1) for more options
 HISTCONTROL=ignoreboth
 
-# append to the history file, don't overwrite it
-# check the window size after each command and, if necessary,
-# update the values of LINES and COLUMNS.
-
-# If set, the pattern "**" used in a pathname expansion context will
-# match all files and zero or more directories and subdirectories.
+# sh Options
 shopt -s histappend
 shopt -s checkwinsize
 shopt -s globstar
+shopt -s checkwinsize
 
 # for setting history length see HISTSIZE and HISTFILESIZE in bash(1)
-HISTSIZE=1000
-HISTFILESIZE=2000
+HISTSIZE=10000
+HISTFILESIZE=20000
 
 # make less more friendly for non-text input files, see lesspipe(1)
 [ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
@@ -33,12 +29,8 @@ HISTFILESIZE=2000
 if [ -x /usr/bin/dircolors ]; then
     test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
     alias ls='ls --color=auto'
-    #alias dir='dir --color=auto'
-    #alias vdir='vdir --color=auto'
-
-    #alias grep='grep --color=auto'
-    #alias fgrep='fgrep --color=auto'
-    #alias egrep='egrep --color=auto'
+    alias dir='dir --color=auto'
+    alias grep='grep --color=auto'
 fi
 
 # enable programmable completion features (you don't need to enable
@@ -53,9 +45,10 @@ if ! shopt -oq posix; then
 fi
 
 export PATH="/home/$USER/git/system/Scripts:$PATH:/home/$USER/.local/bin"
+. "$HOME/.cargo/env"
 
 case "$TERM" in
-xterm*|rxvt*|screen)q
+xterm*|rxvt*|screen)
     GREENISH="\[\033[32m\]"
     BLUISH="\[\033[94m\]"
     CYANISH="\[\033[96m\]"
@@ -64,6 +57,11 @@ xterm*|rxvt*|screen)q
 *)
     ;;
 esac
+
+__host_name() {
+  local hn="$(cat /etc/hostname)";
+  if [ ! "$hn" = "apaz-laptop" ]; then printf "@$hn"; fi
+}
 
 __git_color() {
   local gb="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)";
@@ -83,7 +81,7 @@ __git_print() {
   if [ -n "$gb" ]; then
       printf "$gb"
   else
-    local nrepos="$(find . -maxdepth 2 -name .git -type d | wc -l)"
+    local nrepos="$(find . -maxdepth 2 -name .git -type d | wc -l)";
     if [ $nrepos -eq '0' ]; then
       printf "-"
     else
@@ -93,7 +91,7 @@ __git_print() {
 }
 
 PS1="\
-$GREENISH\u\
+$GREENISH\u\$(__host_name)\
 $BLUISH[\
 \[\$(if test \$? -eq 0; then echo '\033[32m'; else echo '\033[31m'; fi)\]x\
 $BLUISH][\

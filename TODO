@@ -1,2 +1,3 @@
 #!/bin/sh
+#xfce4-terminal --hide-scrollbar -e 'bash -c "nano ~/Documents/TODO"' -T "TODO"
 nano ~/Documents/TODO
