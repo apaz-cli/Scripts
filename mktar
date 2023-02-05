@@ -5,6 +5,7 @@ if [ "$#" -eq 0 ]; then
 elif [ "$#" -eq 1 ]; then
   echo tar -czvf "$1.tar.gz" "$1"
 else
-  echo tar -czvf "$@"
+  OUT="$1.tar.gz"; shift
+  echo tar -czvf "$OUT" "$@"
 fi
 
