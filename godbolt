@@ -1,8 +1,17 @@
 #!/bin/sh
-RED='\033[1;31m'
-NC='\033[0m'
-if [ ! -f "$1" ]; then
-	echo "${RED}Please provide an input file.${NC}"
-	exit 1
+
+PP=0
+if [ "$1" = "pp" ]; then
+  PP=1;shift
 fi
-gcc -E -P $1 | xclip -selection clipboard && vivaldi https://godbolt.org &
+
+if [ ! -f "$1" ]; then
+  echo "\033[1;31mPlease provide an input file.\033[0m"
+  exit 1
+fi
+
+if [ "$PP" -eq 1 ]; then
+  cc -E -P "$1" | xclip -selection clipboard && xdg-open https://godbolt.org &
+else
+  cat "$1" | xclip -selection clipboard && xdg-open https://godbolt.org &
+fi
