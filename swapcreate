@@ -1,0 +1,57 @@
+#!/bin/sh
+
+if [ "$1" = "" ]; then
+  echo "Usage: swapcreate <# of GiB to allocate on /dev/sda1>"
+  exit 1
+fi
+
+if [ "$2" = "" ]; then
+  TARGET=$(findmnt /dev/sda1 | grep '/dev' | awk '{print $1}')
+  if [ "$TARGET" = "" ]; then
+  echo "Could not find a drive mounted at /dev/sda1."
+  exit 1
+  fi
+  SWAPFILE="$TARGET/swapfile.img"
+elif [ "$2" = "home" ]; then
+  SWAPFILE="$(realpath ~)/swapfile.img"
+else
+  SWAPFILE="$2/swapfile.img"
+fi
+
+NUMGI="$1""Gi"
+NUMBYTES="$(numfmt $NUMGI --from=auto)"
+FREEKILO="$(df /dev/sda | grep '/dev' | awk '{print $4}')K"
+FREEBYTES="$(numfmt $FREEKILO --from=auto)"
+FREEGI="$(numfmt $FREEKILO --from=auto --to=iec-i)"
+
+if [ "$FREEBYTES" -lt "$NUMBYTES" ]; then
+  echo "Not enough space on /dev/sda1."
+  exit 1
+fi
+
+ESWAPFILE="$(sudo swapon --show | grep '/swapfile.img' | awk '{print $1}')"
+if test -f "$ESWAPFILE"; then
+  echo "Swapfile already exists. Please call swapdestroy before creating another."
+  exit 1
+fi
+
+ALLOC_BLKSIZE="4096"
+ALLOC_BLOCKS="$(expr $NUMBYTES / $ALLOC_BLKSIZE)"
+
+echo "Creating swapfile: $SWAPFILE"
+if command -v fallocate >/dev/null; then
+  sudo fallocate -l "$NUMGI""B" "$SWAPFILE"
+else
+  sudo dd "if=/dev/zero" "of=$SWAPFILE" "bs=$ALLOC_BLKSIZE" "count=$ALLOC_BLOCKS"
+fi
+
+sudo chmod 600 "$SWAPFILE"
+
+sudo mkswap "$SWAPFILE"
+
+sudo swapon "$SWAPFILE"
+
+echo "Swapfile created."
+echo
+sudo swapon --show
+

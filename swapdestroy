@@ -1,0 +1,17 @@
+#!/bin/sh
+
+SWAPFILE="$(sudo swapon --show | grep '/swapfile.img' | awk '{print $1}')"
+if [ "$SWAPFILE" = "" ]; then
+  echo "Could not find a swapfile.img to destroy."
+  exit 1
+fi
+
+echo "Turning off swapfile. This may take some time as pages return to memory."
+sudo swapoff "$SWAPFILE"
+
+echo "Removing the swapfile."
+rm -f "$SWAPFILE"
+
+echo "Swapfile destroyed."
+echo
+sudo swapon --show
