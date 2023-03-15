@@ -1,19 +1,21 @@
 #!/bin/sh
 
 if [ "$1" = "" ]; then
-  echo "Usage: swapcreate <# of GiB to allocate on /dev/sda1>"
+  echo "Usage: swapcreate <num> <loc>?"
+  echo "  where <num> is the number of GiB to allocate"
+  echo "  and <loc> is the folder to put the swapfile in."
+  echo "  If no argument is provided for <loc>, it defaults"
+  echo "  to whatever mounts at /dev/sda1."
   exit 1
 fi
 
 if [ "$2" = "" ]; then
   TARGET=$(findmnt /dev/sda1 | grep '/dev' | awk '{print $1}')
   if [ "$TARGET" = "" ]; then
-  echo "Could not find a drive mounted at /dev/sda1."
-  exit 1
+    echo "Could not find a drive mounted at /dev/sda1."
+    exit 1
   fi
   SWAPFILE="$TARGET/swapfile.img"
-elif [ "$2" = "home" ]; then
-  SWAPFILE="$(realpath ~)/swapfile.img"
 else
   SWAPFILE="$2/swapfile.img"
 fi

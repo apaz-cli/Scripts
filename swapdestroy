@@ -1,5 +1,7 @@
 #!/bin/sh
 
+# Usage: No arguments.
+
 SWAPFILE="$(sudo swapon --show | grep '/swapfile.img' | awk '{print $1}')"
 if [ "$SWAPFILE" = "" ]; then
   echo "Could not find a swapfile.img to destroy."
