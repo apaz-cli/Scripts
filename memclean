@@ -1,16 +1,17 @@
 #!/bin/sh
 
 FIRE=$(pgrep     firefox)
-CODE=$(pgrep -f  "code --unity-launch")
-DISC=$(pgrep -fx "/usr/share/discord/Discord")
-
 if [ ! "$FIRE" = "" ]; then
   for pid in $FIRE; do kill -s SIGTERM "$pid"; echo "Killed Firefox: $pid"; done  
 fi
+
+CODE=$(pgrep -f  "code --unity-launch")
 if [ ! "$CODE" = "" ]; then
   for pid in $CODE; do kill -s SIGTERM "$pid"; echo "Killed VSCode: $pid"; done
 fi
-if [ ! "$DISC" = "" ]; then
-  for pid in $DISC; do kill -s SIGTERM "$pid"; echo "Killed Discord: $pid"; done
-fi
+
+#DISC=$(pgrep -fx "/usr/share/discord/Discord")
+#if [ ! "$DISC" = "" ]; then
+#  for pid in $DISC; do kill -s SIGTERM "$pid"; echo "Killed Discord: $pid"; done
+#fi
 

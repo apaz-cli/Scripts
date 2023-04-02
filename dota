@@ -1,3 +1,5 @@
 #!/bin/sh
+
+memclean
 steam steam://rungameid/570 &
 kill -9 $PPID
