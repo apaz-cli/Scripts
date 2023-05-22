@@ -2,10 +2,11 @@
 
 if [ "$#" -eq 0 ]; then
   echo "USAGE: mktar <output> <input>..."
+  exit 1
 elif [ "$#" -eq 1 ]; then
-  echo tar -czvf "$1.tar.gz" "$1"
+  tar -czvf "$1.tar.gz" "$1"
 else
   OUT="$1.tar.gz"; shift
-  echo tar -czvf "$OUT" "$@"
+  tar -czvf "$OUT" "$@"
 fi
 

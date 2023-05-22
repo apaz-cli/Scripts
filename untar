@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 if [ -z "$1" ]
   then
-    echo Please specify a tar.gz archive to decompress.
+    echo "Please specify a tar.gz archive to decompress."
+    exit 1
 fi
 
-if [[ $1 != *.tar.gz ]]
+if [[ "$1" != *.tar.gz ]]
   then
-    echo Expected the first argument to be a tar.gz file. Got: $1
+    echo "Expected the first argument to be a tar.gz file. Got: $1"
+    exit 1
 fi
 
 if [ -z "$2" ]
   then
-    tar -xzvf $1
+    tar -xzvf "$1"
   else
-    tar -xzvf $1 --directory=$2
+    tar -xzvf "$1" "--directory=$2"
 fi
 

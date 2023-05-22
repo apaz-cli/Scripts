@@ -1,2 +1,2 @@
 #!/bin/sh
-exec ~/jl/julia/julia "$@"
+exec ~/git/julia/julia "$@"
