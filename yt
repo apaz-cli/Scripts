@@ -1,4 +1,5 @@
 #!/bin/sh
 cd '/home/apaz/Videos/'
 ytdl $@
+if [ ! $? = "0" ]; then exit 1; fi
 kill -9 $PPID

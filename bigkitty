@@ -1,0 +1,15 @@
+#!/bin/sh
+
+ORIGINAL="$HOME/.config/kitty/kitty.conf"
+TEMP="$HOME/.config/kitty/kitty.conf.tmp"
+SMALL="font_size 15"
+BIG="font_size 37.5"
+
+mv "$ORIGINAL" "$TEMP"
+cat "$TEMP" | sed "s/$SMALL/$BIG/g" > "$ORIGINAL"
+
+nohup kitty >/dev/null 2>&1
+
+mv "$TEMP" "$ORIGINAL"
+
+#kill -9 $PPID

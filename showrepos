@@ -1,0 +1,44 @@
+#!/bin/sh
+
+# Print the repos in the given directory, what branch they're on, and if they're clean.
+
+if [ "$1" = "" ]; then
+  SEARCHPATH="$(pwd)"
+else
+  SEARCHPATH="$(realpath $1)"
+  if [ ! -d "$SEARCHPATH" ]; then
+    echo "Could not find folder: $SEARCHPATH";
+    exit 1;
+  fi
+fi
+
+
+cd "$SEARCHPATH"
+
+REPOS=$(find . -maxdepth 2 -name .git -type d \
+      | cut -c 3- | rev \
+      | cut -c 5- | rev \
+      | sort -f)
+
+RED="\e[31m"
+GREEN="\e[32m"
+BLUE="\e[94m"
+RESET="\e[00m"
+
+PADTO="$(printf '%s\n' \"${REPOS}\" | wc -L)"
+
+for REPO in $REPOS; do
+  cd "$REPO"
+
+  if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+      BC="$RED"
+  else
+      BC="$GREEN"
+  fi
+  BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+  PADLEN="$((4 + $PADTO - $(echo $REPO | wc -L)))"
+  PAD="$(yes ' ' | head -n $PADLEN | tr -d \\n)"
+
+  echo "$BLUE$REPO$RESET$PAD$BC[$BRANCH]$RESET"
+  cd "$SEARCHPATH"
+done

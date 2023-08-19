@@ -1,0 +1,2 @@
+#!/bin/sh
+locate "$1" | grep "$1"

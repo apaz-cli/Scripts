@@ -28,7 +28,7 @@ FREEGI="$(numfmt $FREEKILO --from=auto --to=iec-i)"
 
 if [ "$FREEBYTES" -lt "$NUMBYTES" ]; then
   echo "Not enough space on /dev/sda1."
-  exit 1
+  #exit 1
 fi
 
 ESWAPFILE="$(sudo swapon --show | grep '/swapfile.img' | awk '{print $1}')"
