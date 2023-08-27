@@ -1,9 +1,16 @@
 #!/bin/sh
 
+if [ ! "$1" = "" ]; then
+  if ! python -c "import sys; int(sys.argv[1])" "$1" 2>/dev/null; then echo "Argument must be an integer."; exit 1; fi
+  SIZE="$1"
+else
+  SIZE="37.5"
+fi
+
 ORIGINAL="$HOME/.config/kitty/kitty.conf"
 TEMP="$HOME/.config/kitty/kitty.conf.tmp"
 SMALL="font_size 15"
-BIG="font_size 37.5"
+BIG="font_size $SIZE"
 
 mv "$ORIGINAL" "$TEMP"
 cat "$TEMP" | sed "s/$SMALL/$BIG/g" > "$ORIGINAL"
