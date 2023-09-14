@@ -1,0 +1,27 @@
+#!/bin/sh
+
+SAMPLERATE="128k"
+AUDIORATE="44100"
+
+if [ "$1" = "all" ]; then
+  for FILE in *.mp4; do
+    BASENAME="${FILE%.mp4}"
+    NEWNAME="$BASENAME.mp3"
+    echo "$FILE"
+    if [ "$FILE" = "$BASENAME" ]; then echo "Can only convert \".mp4\" files."; exit 1; fi
+
+    if [ "$2" = "threaded" ]; then
+      ffmpeg -i "$FILE" -vn -ab "$SAMPLERATE" -ar "$AUDIORATE" -y "$NEWNAME" 2>/dev/null &
+    else
+      ffmpeg -i "$FILE" -vn -ab "$SAMPLERATE" -ar "$AUDIORATE" -y "$NEWNAME" 2>/dev/null
+    fi
+  done
+  exit 0
+fi
+
+FILE="$1"
+BASENAME="${FILE%.mp4}"
+NEWNAME="$BASENAME.mp3"
+if [ "$FILE" = "$BASENAME" ]; then echo "Can only convert \".mp4\" files."; exit 1; fi
+
+ffmpeg -i "$FILE" -vn -ab "$SAMPLERATE" -ar "$AUDIORATE" -y "$NEWNAME" 2>/dev/null

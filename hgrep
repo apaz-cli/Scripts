@@ -1,2 +1,2 @@
 #!/bin/sh
-cat ~/.bash_history | grep "$1"
+grep $@ ~/.bash_history

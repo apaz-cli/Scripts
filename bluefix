@@ -1,0 +1,3 @@
+#!/bin/sh
+systemctl --user enable pulseaudio
+systemctl --user start pulseaudio

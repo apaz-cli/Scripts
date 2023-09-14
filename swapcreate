@@ -26,11 +26,6 @@ FREEKILO="$(df /dev/sda | grep '/dev' | awk '{print $4}')K"
 FREEBYTES="$(numfmt $FREEKILO --from=auto)"
 FREEGI="$(numfmt $FREEKILO --from=auto --to=iec-i)"
 
-if [ "$FREEBYTES" -lt "$NUMBYTES" ]; then
-  echo "Not enough space on /dev/sda1."
-  #exit 1
-fi
-
 ESWAPFILE="$(sudo swapon --show | grep '/swapfile.img' | awk '{print $1}')"
 if test -f "$ESWAPFILE"; then
   echo "Swapfile already exists. Please call swapdestroy before creating another."
