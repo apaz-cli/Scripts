@@ -1,2 +1,6 @@
 #!/bin/sh
-grep $@ ~/.bash_history
+if [ "$#" -ne 1 ]; then
+  cat ~/.bash_history
+else
+  grep $@ ~/.bash_history 2>/dev/null
+fi
