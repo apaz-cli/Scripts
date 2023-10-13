@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # Print the repos in the given directory, what branch they're on, and if they're clean.
 
@@ -11,7 +11,6 @@ else
     exit 1;
   fi
 fi
-
 
 cd "$SEARCHPATH"
 
@@ -39,6 +38,6 @@ for REPO in $REPOS; do
   PADLEN="$((4 + $PADTO - $(echo $REPO | wc -L)))"
   PAD="$(yes ' ' | head -n $PADLEN | tr -d \\n)"
 
-  echo "$BLUE$REPO$RESET$PAD$BC[$BRANCH]$RESET"
+  echo -e "$BLUE$REPO$RESET$PAD$BC[$BRANCH]$RESET"
   cd "$SEARCHPATH"
 done
