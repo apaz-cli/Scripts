@@ -1,0 +1,11 @@
+#!/bin/sh
+
+if [ ! "$#" -eq 1 ]; then
+    echo "Usage: newscript <scriptname>"
+    exit 1
+fi
+
+cd ~/git/system/Scripts/
+echo "#!/bin/sh" > "$1"
+chmod +x "$1"
+$EDITOR "$1"

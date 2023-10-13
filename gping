@@ -1,0 +1,3 @@
+#!/bin/sh
+echo "Pinging google's domain name resolution service."
+ping 8.8.8.8

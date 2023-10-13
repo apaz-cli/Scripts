@@ -1,0 +1,17 @@
+#!/bin/sh
+WD="$(pwd)"
+cd /tmp/
+rm -rf raylib/ 2>/dev/null
+git clone --depth=1 https://github.com/raysan5/raylib/
+if [ "$?" -ne 0 ]; then echo "Git clone failed!"; exit 1; fi
+cd raylib/
+mkdir build
+cd build/
+cmake ..
+if [ "$?" -ne 0 ]; then echo "Cmake failed!"; exit 1; fi
+make CFLAGS="-static" PLATFORM=PLATFORM_DESKTOP -j
+if [ "$?" -ne 0 ]; then echo "Make failed!"; exit 1; fi
+cd "$WD"
+cp -r /tmp/raylib/build/raylib/ "$WD"
+echo "Example build command:"
+echo "cc -I./raylib/include -o raytest raytest.c raylib/libraylib.a -L./raylib/lib -lraylib -lGL -lm -lpthread -ldl -lrt -lX11"

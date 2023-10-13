@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Print the repos in the given directory, what branch they're on, and if they're clean.
 

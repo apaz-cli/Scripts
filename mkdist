@@ -91,7 +91,7 @@ echo "Installed Youtube-dl."
 cd /usr/share/themes
 sudo curl -sL https://cdn.discordapp.com/attachments/472924293593038858/709656417187135550/Xfce-Simple-Dark.tar.gz -o /usr/share/themes/Xfce-Simple-Dark.tar.gz
 sudo tar -xvzf Xfce-Simple-Dark.tar.gz
-sudo rm Xfce-Simple-Dark.zip
+sudo rm Xfce-Simple-Dark.tar.gz
 
 # Border-Only xfwm4 theme
 cd /usr/share/themes
@@ -227,7 +227,7 @@ echo "Installed Eclipse."
 # VSCode
 cd ~
 curl -L https://update.code.visualstudio.com/latest/linux-deb-x64/stable -o code.deb
-sudo dkpg -i code.deb
+sudo dpkg -i code.deb
 rm code.deb
 sudo chown -R $(whoami) ~/.config/Code
 sudo chown -R $(whoami) /usr/share/code
