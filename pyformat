@@ -1,0 +1,2 @@
+#!/bin/sh
+python -m black $(git status --porcelain | awk 'match($1, "M") && match($2, "\\.py$") {print $2}')

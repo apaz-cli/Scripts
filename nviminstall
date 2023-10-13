@@ -1,6 +1,8 @@
 #!/bin/sh
 
 WD="$(pwd)"
+
+# Build and install neovim locally
 cd /tmp/
 git clone --depth=1 https://github.com/neovim/neovim
 cd neovim/
@@ -9,7 +11,12 @@ make -j \
   CMAKE_EXTRA_FLAGS="-DCMAKE_INSTALL_PREFIX=$HOME/.neovim"
 make install
 
+# Install my configs
+cd ~/.config
+git clone https://github.com/apaz-cli/nvim-config nvim/
+
 export PATH="$HOME/.neovim/bin:$PATH"
 echo "Edited the \$PATH for this bash session."
 echo "Make sure that \"~/\$HOME/.nvim/bin\" is added to \$PATH in your .bashrc."
 cd "$WD"
+

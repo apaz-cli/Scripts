@@ -6,6 +6,6 @@ if [ ! "$#" -eq 1 ]; then
 fi
 
 cd ~/git/system/Scripts/
-echo "#!/bin/sh" > "$1"
+if [ ! -f "$1" ]; then echo "#!/bin/sh" > "$1"; fi
 chmod +x "$1"
 $EDITOR "$1"
