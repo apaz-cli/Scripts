@@ -1,7 +1,10 @@
 #!/bin/sh
 
 if [ ! "$1" = "" ]; then
-  if ! python -c "import sys; int(sys.argv[1])" "$1" 2>/dev/null; then echo "Argument must be an integer."; exit 1; fi
+  if ! awk 'BEGIN { if (ARGV[1] ~ /^[+-]?([0-9]*[.])?[0-9]+$/) exit 0; else exit 1 }' "$1" 2>/dev/null; then
+    echo "Argument must be a valid float.";
+    exit 1;
+  fi
   SIZE="$1"
 else
   SIZE="37.5"
