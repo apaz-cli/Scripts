@@ -38,6 +38,6 @@ for REPO in $REPOS; do
   PADLEN="$((4 + $PADTO - $(echo $REPO | wc -L)))"
   PAD="$(yes ' ' | head -n $PADLEN | tr -d \\n)"
 
-  echo -e "$BLUE$REPO$RESET$PAD$BC[$BRANCH]$RESET"
+  printf "$BLUE$REPO$RESET$PAD$BC[$BRANCH]$RESET\n"
   cd "$SEARCHPATH"
 done
