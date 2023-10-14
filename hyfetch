@@ -1,0 +1,17 @@
+#!/bin/sh
+
+INSTALL_DIR="/tmp/hyfetch"
+
+WD="$(pwd)"
+if [ ! -f "$INSTALL_DIR/bin/hyfetch" ]; then
+  git clone --depth=1 https://github.com/hykilpikonna/hyfetch "$INSTALL_DIR" 2>/dev/null
+  python -m venv "$INSTALL_DIR/" >/dev/null
+  CLONED="true"
+fi
+cd "$INSTALL_DIR"
+if [ "$CLONED" = "true" ]; then
+  bin/python setup.py install >/dev/null 2>&1
+fi
+
+bin/hyfetch $@
+cd "$WD"
