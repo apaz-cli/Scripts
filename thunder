@@ -9,15 +9,17 @@
 # . ../thunder
 
 WD="$(pwd)"
+PROJ="lightning-thunder"
 REPO="main"
-if [ ! "$(echo \"$WD\" | grep lightning-thunder)" = "" ]; then
+CONDA_ENV="thunder-3-10-9"
+if [ ! "$(echo \"$WD\" | grep $PROJ)" = "" ]; then
   cd ..
-  REPO=$(echo "$WD" | awk -F "lightning-thunder" '{print $2}')
+  REPO=$(echo "$WD" | awk -F "$PROJ" '{print $2}')
 elif [ ! "$1" = "" ]; then
   REPO="$1"
 fi
 
-NWD="lightning-thunder$REPO/"
+NWD="$PROJ$REPO/"
 cd "$NWD" 2>/dev/null
 if [ ! "$?" = "0" ]; then echo "Cannot cd to $NWD"; fi
-conda activate thunder-3-10-9 2>/dev/null
+conda activate "$CONDA_ENV" 2>/dev/null
