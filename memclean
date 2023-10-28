@@ -1,6 +1,6 @@
 #!/bin/sh
 
-FIRE=$(pgrep     firefox)
+FIRE=$(pgrep firefox)
 if [ ! "$FIRE" = "" ]; then
   for pid in $FIRE; do kill -s SIGTERM "$pid"; echo "Killed Firefox: $pid"; done  
 fi

@@ -1,0 +1,9 @@
+#!/bin/sh
+
+if [ ! -d "/tmp/ghstack" ]; then
+  mkdir /tmp/ghstack 2>/dev/null
+  python -m venv /tmp/ghstack
+  /tmp/ghstack/bin/pip install ghstack
+fi
+/tmp/ghstack/bin/ghstack $@
+
