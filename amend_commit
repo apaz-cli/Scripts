@@ -1,0 +1,34 @@
+#!/bin/bash
+
+# Based on: https://stackoverflow.com/questions/1186535/how-to-modify-a-specified-commit
+SHA=$(git rev-parse ${1} 2> /dev/null)
+if [ $? -ne 0 ]; then
+    echo "Cannot resolve ${1}"
+    return 1
+fi
+
+git log -1 $SHA
+read -r -p "Continue? [y/N] " response
+response=${response,,}    # tolower
+if [[ "$response" =~ ^(yes|y)$ ]]; then
+    CHECKPOINT=$(git rev-parse HEAD)
+    git stash -k || _helper_fail "stash"
+
+    function cleanup_failure() {
+        # Everything (including the staged changes) was stored when we stash.
+        git reset --hard "${CHECKPOINT}"
+        git stash pop
+        _helper_fail "${1}"
+    }
+
+    git commit --fixup "${SHA}" || cleanup_failure "Commit failed."
+
+    {
+        GIT_SEQUENCE_EDITOR=true git rebase --interactive --autosquash "$SHA^"
+    } || {
+        git rebase --abort
+        cleanup_failure "Rebase failed."
+    }
+
+    git stash pop
+fi
