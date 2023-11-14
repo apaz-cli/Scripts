@@ -36,7 +36,7 @@ for REPO in $REPOS; do
   fi
   BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
   PADLEN="$((4 + $PADTO - $(echo $REPO | wc -L)))"
-  PAD="$(yes ' ' | head -n $PADLEN | tr -d \\n)"
+  PAD=$(printf '%*s' "$PADLEN")
 
   printf "$BLUE$REPO$RESET$PAD$BC[$BRANCH]$RESET\n"
   cd "$SEARCHPATH"
