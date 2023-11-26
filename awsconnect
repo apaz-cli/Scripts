@@ -1,3 +1,3 @@
 #!/bin/sh
-xterm -e "ssh -i ~/.ssh/AWS_Key.pem admin@ec2-3-87-232-195.compute-1.amazonaws.com"
+xterm -e "ssh -i ~/.ssh/AWS_Key.pem admin@ec2-54-80-165-12.compute-1.amazonaws.com"
 kill -9 $PPID

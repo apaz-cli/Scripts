@@ -1,0 +1,11 @@
+#!/bin/sh
+
+killall xfce4-appfinder
+
+pgrep xfce4-panel >/dev/null
+if [ $? -eq 0 ]; then
+  xfce4-popup-whiskermenu
+else
+  xfce4-appfinder --disable-server
+fi
+

@@ -69,7 +69,7 @@ echo "Added webp support to Thunar."
 #echo "Scroll speed set."
 
 # Greeter
-echo -e 'background=/home/apaz/Pictures/Icons-Resources/Greeter_Wall.png\ndefault-user-image=/home/apaz/Pictures/Icons-Resources/PFP.jpg\nicon-theme-name=Tango\nindicators = ~clock;~power\nfont-name= Nimbus Mono L Bold' | sudo tee -a /etc/lightdm/lightdm-gtk-greeter.conf >/dev/null
+echo -e '[greeter]\nbackground = /home/apaz/Pictures/Icons-Resources/Greeter_Wall.png\ndefault-user-image = /home/apaz/Pictures/Icons-Resources/PFP.jpg\nicon-theme-name = Tango\nindicators = ~clock;~power\nfont-name = Nimbus Mono L Bold' | sudo tee -a /etc/lightdm/lightdm-gtk-greeter.conf >/dev/null
 
 ##################
 # HELPER SCRIPTS #

@@ -1,0 +1,4 @@
+#!/bin/sh
+
+GHP="/home/$USER/git/ghp"
+if [ -f "$GHP" ]; then cat "$GHP"; xclip "$GHP"; fi
