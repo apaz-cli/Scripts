@@ -1,0 +1,12 @@
+#!/bin/sh
+
+REPOS=$(find . -maxdepth 2 -name .git -type d \
+      | cut -c 3- | rev \
+      | cut -c 5- | rev \
+      | sort -f)
+
+for REPO in $REPOS; do
+  cd "$REPO"
+  git fetch
+  cd ..
+done
