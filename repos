@@ -17,7 +17,7 @@ cd "$SEARCHPATH"
 REPOS=$(find . -maxdepth 2 -name .git -type d \
       | cut -c 3- | rev \
       | cut -c 5- | rev \
-      | sort -f)
+      | sort -V -f)
 
 RED="\e[31m"
 GREEN="\e[32m"
