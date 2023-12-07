@@ -1,0 +1,2 @@
+#!/bin/sh
+nano -0v $@
