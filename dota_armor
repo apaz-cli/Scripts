@@ -1,0 +1,13 @@
+#!/bin/python3
+
+# https://dota2.fandom.com/wiki/Armor#Damage_Multiplier
+
+try:
+	import sys
+	dmg = float(sys.argv[1])
+	armor = float(sys.argv[2])
+	Dmu = 1 - ((.06 * armor)) / (1 + .06 * abs(armor))
+	clamped_Dmu = max(min(Dmu, 2), 0)
+	print(dmg * clamped_Dmu)
+except:
+	print("Usage: python3 dota_armor <damage> <armor>")

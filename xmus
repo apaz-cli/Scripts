@@ -1,0 +1,7 @@
+#!/bin/sh
+
+xterm                                    \
+  -fa 'lemon'                            \
+  -fd 'Unifont'                          \
+  -fs 12                                 \
+  -e 'vlc -I ncurses --no-video ~/Music/'

@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+
+from sys import argv
+
+if len(argv) < 2:
+  print("Usage: deckcheck <deck file>")
+
+lines = open(argv[1], 'r').readlines()
+
+pm = 0
+num = 0
+for l in lines:
+  l = l.strip()
+  if not len(l) or l[len(l)-1] == ':':
+    continue
+
+  fdigits = 0
+  while len(l) > fdigits and l[fdigits].isdigit():
+    fdigits += 1
+  n1 = n2 = int(l[:fdigits]) if fdigits else 1
+
+  while l[fdigits] == ' ':
+    fdigits += 1
+  if l[fdigits] == '-':
+    fdigits += 1
+    start = fdigits
+    while l[fdigits] == ' ':
+      fdigits += 1
+
+    fdigits = start
+    while len(l) > fdigits and l[fdigits].isdigit():
+      fdigits += 1
+    n2 = fdigits
+
+  nam = l[fdigits:].strip()
+
+  if l[len(l)-1]=='?':
+    n1 = 0
+    nam = nam[:len(nam)-1].strip()
+
+  pm += max(n1, n2) - min(n1, n2)
+  num += max(n1, n2)
+
+print((str(num-pm) + "-" + str(num)) if pm else num)
