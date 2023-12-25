@@ -1,0 +1,12 @@
+#!/bin/sh
+
+if [ "$#" -eq 1 ]; then
+    a="$1"
+    if echo "$a" | grep -qE '^-?[0-9]+$'; then
+        git diff HEAD~$(($1 + 1)) HEAD~$1
+    else
+        git diff $@
+    fi
+else
+    git diff $@
+fi
