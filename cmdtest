@@ -1,0 +1,7 @@
+#!/bin/sh
+
+I=0
+for arg in $@; do
+  echo "arg $I:" "$arg"
+  I="$(expr $I + 1)"
+done
