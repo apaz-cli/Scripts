@@ -8,9 +8,10 @@ if [ ! -f "$INSTALL_DIR/bin/hyfetch" ]; then
   python -m venv "$INSTALL_DIR/" >/dev/null
   CLONED="true"
 fi
+
 cd "$INSTALL_DIR"
 if [ "$CLONED" = "true" ]; then
-  bin/python setup.py install >/dev/null 2>&1
+  bin/python setup.py install #>/dev/null 2>&1
 fi
 
 bin/hyfetch $@

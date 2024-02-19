@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# Dependencies: bash, nvidia-smi, cut, grep, head, xargs
+
+# TODO: Make it pretty.
+# TODO: Trim the GPU_INFO
+
+# GENERAL SETUP
+PANEL_TEXT_SEPARATOR="·" # · ︙
+RUN_ON_CLICK="nvidia-settings"
+CELCIUS="<sup>o</sup>" # you might want `℃`, `ºC` or '<sup>o</sup>C` instead
+
+GPU_MAX_MHZ="1920"
+GPU_MAX_TEMP="100"
+
+# NVIDIA GPU INFORMATION AND STATUS
+# DOCS: `nvidia-smi --help-query-gpu`
+# Get all information as CSV then gets each column with `cut`
+GPU_INFO=$(nvidia-smi --query-gpu=\
+memory.total,\
+memory.used,\
+memory.free,\
+clocks.current.graphics,\
+clocks.current.memory,\
+clocks.current.video,\
+pcie.link.gen.current,\
+pcie.link.gen.max,\
+pcie.link.width.current,\
+pcie.link.width.max,\
+power.draw,\
+temperature.gpu,\
+gpu_name,\
+gpu_serial,\
+driver_version,\
+vbios_version --format=csv,noheader)
+## Memory
+GPU_MEM_TOTAL=$(echo "${GPU_INFO}" | cut -d',' -f 1 | xargs)
+GPU_MEM_USED=$(echo "${GPU_INFO}" | cut -d',' -f 2 | xargs)
+GPU_MEM_FREE=$(echo "${GPU_INFO}" | cut -d',' -f 3 | xargs)
+## Frecuency and Clocks
+GPU_CLOCK_GRAPH=$(echo "${GPU_INFO}" | cut -d',' -f 4 | xargs)
+GPU_CLOCK_MEM=$(echo "${GPU_INFO}" | cut -d',' -f 5 | xargs)
+GPU_CLOCK_VIDEO=$(echo "${GPU_INFO}" | cut -d',' -f 6 | xargs)
+## PCIe
+GPU_PCIE_GEN_USING=$(echo "${GPU_INFO}" | cut -d',' -f 7 | xargs)
+GPU_PCIE_GEN_MAX=$(echo "${GPU_INFO}" | cut -d',' -f 8 | xargs)
+GPU_PCIE_LANES_USING=$(echo "${GPU_INFO}" | cut -d',' -f 9 | xargs)
+GPU_PCIE_LANES_MAX=$(echo "${GPU_INFO}" | cut -d',' -f 10 | xargs)
+## Power draw
+GPU_POWER_DRAW=$(echo "${GPU_INFO}" | cut -d',' -f 11 | xargs)
+## Temperature
+GPU_TEMP=$(echo "${GPU_INFO}" | cut -d',' -f 12 | xargs)
+## Model info and drivers
+GPU_MODEL=$(echo "${GPU_INFO}" | cut -d',' -f 13 | xargs)
+GPU_SERIAL=$(echo "${GPU_INFO}" | cut -d',' -f 14 | xargs)
+GPU_DRIVER=$(echo "${GPU_INFO}" | cut -d',' -f 15 | xargs)
+GPU_BIOS=$(echo "${GPU_INFO}" | cut -d',' -f 16 | xargs)
+GPU_CUDA=$(nvidia-smi -q -u | grep CUDA | head -n 1 | cut -d ':' -f 2 | xargs)
+
+GPU_MODEL_SHORT="$(echo $GPU_MODEL | cut -d' ' -f 3) $(echo $GPU_MODEL | cut -d' ' -f 4)$(echo $GPU_MODEL | cut -d' ' -f 5)"
+
+# Main text that shows in the panel
+PANEL_TEXT="<txt>"
+#PANEL_TEXT+="<b>${GPU_MODEL_SHORT}</b> ${PANEL_TEXT_SEPARATOR} "
+PANEL_TEXT+="${GPU_MEM_USED} ${PANEL_TEXT_SEPARATOR} "
+PANEL_TEXT+="${GPU_CLOCK_GRAPH} ${PANEL_TEXT_SEPARATOR} "
+PANEL_TEXT+="${GPU_TEMP}<sup>o</sup>"
+PANEL_TEXT+="<bar>100</bar>"
+PANEL_TEXT+="</txt>"
+
+# Tooltip to show on mouse over. Format is pango markup
+# DOCS: https://developer-old.gnome.org/pygtk/stable/pango-markup-language.html
+TOOLTIP="<tool><tt>"
+TOOLTIP+="<big><b>${GPU_MODEL}</b></big>\n"
+## Memory
+TOOLTIP+="\n<span weight='bold'>MEMORY</span>\n"
+TOOLTIP+="Total : ${GPU_MEM_TOTAL}\n"
+TOOLTIP+="Used  : ${GPU_MEM_USED}\n"
+TOOLTIP+="Free  : ${GPU_MEM_FREE}\n"
+## Clocks
+TOOLTIP+="\n<span weight='bold'>CLOCKS</span>\n"
+TOOLTIP+="Graphics : ${GPU_CLOCK_GRAPH}\n"
+TOOLTIP+="Memory   : ${GPU_CLOCK_MEM}\n"
+TOOLTIP+="Video    : ${GPU_CLOCK_VIDEO}\n"
+## PCI Express
+TOOLTIP+="\n<span weight='bold'>PCI EXPRESS</span>\n"
+TOOLTIP+="Gen. current  : ${GPU_PCIE_GEN_USING}\n"
+TOOLTIP+="Gen. max      : ${GPU_PCIE_GEN_MAX}\n"
+TOOLTIP+="Lanes current : ${GPU_PCIE_LANES_USING}\n"
+TOOLTIP+="Lanes max     : ${GPU_PCIE_LANES_MAX}\n"
+## Information
+TOOLTIP+="\n<span weight='bold'>INFORMATION</span>\n"
+TOOLTIP+="Driver : ${GPU_DRIVER}\n"
+TOOLTIP+="CUDA   : ${GPU_CUDA}\n"
+TOOLTIP+="BIOS   : ${GPU_BIOS}\n"
+TOOLTIP+="Serial : ${GPU_SERIAL}"
+
+TOOLTIP+="</tt></tool>"
+
+# Show everything
+echo -e "${PANEL_TEXT}"
+echo -e "<txtclick>${RUN_ON_CLICK}</txtclick>"
+echo -e "${TOOLTIP}"
+
+exit 0
