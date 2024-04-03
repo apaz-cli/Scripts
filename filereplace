@@ -38,10 +38,14 @@ def main():
     pattern = sys.argv[2]
     replacement = sys.argv[3]
 
-    files = glob.iglob(path + '/**', recursive=True) if os.path.isdir(path) else [path]
+    files = list(glob.iglob(path + '/**', recursive=True)) if os.path.isdir(path) else [path]
+    if verbose:
+        print("Found {len(files)} target files.")
 
     for file_path in files:
         if verbose:
             print(f"Reading file {file_path}")
         if os.path.isfile(file_path):
             replace(file_path, pattern, replacement, verbose)
+        elif verbose:
+            print(f"Skipping over dir {file_path}.")
