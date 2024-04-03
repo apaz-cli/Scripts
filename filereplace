@@ -4,7 +4,6 @@ import sys
 import os
 import tempfile
 import glob
-import numpy
 
 def replace(file_path, pattern, subst, verbose=False):
     # Create temp file, open file as bytes, try to convert to string, and skip if it can't be converted.
@@ -33,7 +32,7 @@ def main():
 
     if sys.argv[1] == '-v':
         verbose = True
-        path = sys.argv[2]
+        sys.argv.pop(1)
 
     path = sys.argv[1]
     pattern = sys.argv[2]
@@ -42,6 +41,6 @@ def main():
     if os.path.isdir(path):
         for file_path in glob.iglob(path + '/**', recursive=True):
             if os.path.isfile(file_path):
-                replace(file_path, pattern, replacement)
+                replace(file_path, pattern, replacement, verbose)
     else:
         replace(path, pattern, replacement)
