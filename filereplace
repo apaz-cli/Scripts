@@ -17,7 +17,7 @@ def replace(file_path, pattern, subst, verbose=False):
             if new != fstr:
                 replaced = True
                 if verbose:
-                    print(f'Replacing {pattern} with {subst} in {file_path}')
+                    print(f'Replaced all instances of {pattern} with {subst} in {file_path}')
         except Exception:
             return
 
@@ -38,9 +38,10 @@ def main():
     pattern = sys.argv[2]
     replacement = sys.argv[3]
 
-    if os.path.isdir(path):
-        for file_path in glob.iglob(path + '/**', recursive=True):
-            if os.path.isfile(file_path):
-                replace(file_path, pattern, replacement, verbose)
-    else:
-        replace(path, pattern, replacement)
+    files = glob.iglob(path + '/**', recursive=True) if os.path.isdir(path) else [path]
+
+    for file_path in files:
+        if verbose:
+            print(f"Reading file {file_path}")
+        if os.path.isfile(file_path):
+            replace(file_path, pattern, replacement, verbose)
