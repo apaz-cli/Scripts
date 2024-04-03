@@ -23,7 +23,7 @@ def replace(file_path, pattern, subst, verbose=False):
 
     if replaced:
         with open(file_path, 'wb') as new_file:
-            new_file.write(new)
+            new_file.write(new.encode('utf-8'))
 
 def main():
     if len(sys.argv) < 4:
@@ -40,7 +40,9 @@ def main():
 
     files = list(glob.iglob(path + '/**', recursive=True)) if os.path.isdir(path) else [path]
     if verbose:
-        print("Found {len(files)} target files.")
+        for f in files:
+            print(f)
+        print(f"Found {len(files)} target files.")
 
     for file_path in files:
         if verbose:
@@ -49,3 +51,5 @@ def main():
             replace(file_path, pattern, replacement, verbose)
         elif verbose:
             print(f"Skipping over dir {file_path}.")
+
+main()
