@@ -1,0 +1,47 @@
+#!/usr/bin/env python
+from io import TextIOWrapper
+import sys
+import os
+import tempfile
+import glob
+import numpy
+
+def replace(file_path, pattern, subst, verbose=False):
+    # Create temp file, open file as bytes, try to convert to string, and skip if it can't be converted.
+    replaced = False
+    new = None
+    with open(file_path, 'rb') as old_file:
+        try:
+            b = old_file.read()
+            fstr = b.decode()
+            new = fstr.replace(pattern, subst)
+            if new != fstr:
+                replaced = True
+                if verbose:
+                    print(f'Replacing {pattern} with {subst} in {file_path}')
+        except Exception:
+            return
+
+    if replaced:
+        with open(file_path, 'wb') as new_file:
+            new_file.write(new)
+
+def main():
+    if len(sys.argv) < 4:
+        print('Usage: filereplace [-v] <path> <pattern> <replacement>')
+        sys.exit(1)
+
+    if sys.argv[1] == '-v':
+        verbose = True
+        path = sys.argv[2]
+
+    path = sys.argv[1]
+    pattern = sys.argv[2]
+    replacement = sys.argv[3]
+
+    if os.path.isdir(path):
+        for file_path in glob.iglob(path + '/**', recursive=True):
+            if os.path.isfile(file_path):
+                replace(file_path, pattern, replacement)
+    else:
+        replace(path, pattern, replacement)

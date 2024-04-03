@@ -1,0 +1,2 @@
+#!/bin/sh
+echo "$(nvidia-smi -q -u | grep CUDA | head -n 1 | cut -d ':' -f 2 | xargs)"

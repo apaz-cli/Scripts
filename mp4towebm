@@ -1,0 +1,27 @@
+#!/bin/sh
+
+if [ "$1" = "all" ]; then
+  for FILE in *.webm; do
+    BASENAME="${FILE%.mp4}"
+    NEWNAME="$BASENAME.webm"
+    echo "$FILE"
+    if [ "$FILE" = "$BASENAME" ]; then echo "Can only convert \".mp4\" files."; exit 1; fi
+
+    if [ "$2" = "threaded" ]; then
+      ffmpeg -i "$FILE" -c copy "$NEWNAME" 2>/dev/null &
+    else
+      ffmpeg -i "$FILE" -c copy "$NEWNAME" 2>/dev/null
+    fi
+  done
+  exit 0
+fi
+
+FILE="$1"
+BASENAME="${FILE%.mp4}"
+NEWNAME="$BASENAME.webm"
+if [ "$FILE" = "$BASENAME" ]; then echo "Can only convert \".mp4\" files."; exit 1; fi
+
+ffmpeg -i "$FILE" -c copy "$NEWNAME" 2>/dev/null
+
+
+

@@ -2,9 +2,9 @@
 
 # Usage: No arguments.
 
-SWAPFILE="$(sudo swapon --show | grep '/swapfile.img' | awk '{print $1}')"
+SWAPFILE="$(sudo swapon --show | grep '/.swapfile.img' | awk '{print $1}')"
 if [ "$SWAPFILE" = "" ]; then
-  echo "Could not find a swapfile.img to destroy."
+  echo "Could not find a .swapfile.img to destroy."
   exit 1
 fi
 

@@ -1,5 +1,5 @@
 #!/bin/sh
 cd '/home/apaz/Videos/'
-yt-dlp $@
+yt-dlp --no-mtime $@
 if [ ! $? = "0" ]; then exit 1; fi
 kill -9 $PPID

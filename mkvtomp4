@@ -1,0 +1,24 @@
+#!/bin/sh
+
+if [ "$1" = "all" ]; then
+  for FILE in *.mkv; do
+    BASENAME="${FILE%.mkv}"
+    NEWNAME="$BASENAME.mp4"
+    echo "$FILE"
+    if [ "$FILE" = "$BASENAME" ]; then echo "Can only convert \".mkv\" files."; exit 1; fi
+
+    if [ "$2" = "threaded" ]; then
+      ffmpeg -i "$FILE" -c copy "$NEWNAME" 2>/dev/null &
+    else
+      ffmpeg -i "$FILE" -c copy "$NEWNAME" 2>/dev/null
+    fi
+  done
+  exit 0
+fi
+
+FILE="$1"
+BASENAME="${FILE%.mkv}"
+NEWNAME="$BASENAME.mp4"
+if [ "$FILE" = "$BASENAME" ]; then echo "Can only convert \".mkv\" files."; exit 1; fi
+
+ffmpeg -i "$FILE" -c copy "$NEWNAME" 2>/dev/null

@@ -1,7 +1,5 @@
 #!/bin/sh
 
-
-
 USAGE=$(echo "USAGE:\ntwit \"https://pbs.twimg.com/media/ExpJmb1UYAAouLF?format=jpg&name=large\"")
 
 URL="$1"
