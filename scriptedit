@@ -1,30 +1,38 @@
 #!/bin/sh
 
 if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
-  echo "Usage: newscript [-p|--python] <scriptname>"
+  echo "Usage: newscript [-p|--python] [-c|--cc] [-b|--bash] <scriptname>"
   echo "Creates a new script with a shebang and opens it in the editor."
   echo ""
   echo "Options:"
   echo "  -p, --python  Use Python shebang instead of shell shebang"
+  echo "  -c, --cc      Use C shebang instead of shell shebang"
+  echo "  -b, --bash    Use bash shebang instead of shell shebang"
   echo "  -h, --help    Display this help message"
   exit 0
 fi
 
 if [ "$1" = "-p" ] || [ "$1" = "--python" ]; then
-  SHEBANG="#!/usr/bin/env python3"
+  SHEBANG="#!/usr/bin/env python3\n"
+  shift
+elif [ "$1" = "-c" ] || [ "$1" = "--cc" ]; then
+  SHEBANG='#if 0\nTMP=$(mktemp -d); cc -o "$TMP/a.out" -x c "$0" && "$TMP/a.out" $@; RVAL=$?; rm -rf ${TMP}; exit ${RVAL}\n#endif\n'
+  shift
+elif [ "$1" = "-b" ] || [ "$1" = "--bash" ]; then
+  SHEBANG="#!/bin/bash\n"
   shift
 else
-  SHEBANG="#!/bin/sh"
+  SHEBANG="#!/bin/sh\n"
 fi
 
 if [ ! "$#" -eq 1 ]; then
-  echo "Usage: newscript [-p|--python] <scriptname>"
+  echo "Usage: scriptedit [-p|--python] [-c|--cc] [-b|--bash] <scriptname>"
   exit 1
 fi
 
 cd ~/git/Scripts/
-if [ ! -f "$1" ]; then 
-  echo "$SHEBANG" > "$1"
+if [ ! -f "$1" ]; then
+  printf "%s\n" "$SHEBANG" | awk '{gsub(/\\n/, "\n"); print}' > "$1"
 fi
 chmod +x "$1"
 $EDITOR "$1"
