@@ -1,2 +1,19 @@
 #!/bin/sh
-echo "https://www.youtube.com/watch?v=$1"
+
+# Given the path to a video downloaded with yt-dlp, or a video id, print the YouTube link it was downloaded from.
+
+# Extract the video ID using a regex pattern
+if echo "$1" | grep -q '^\[.*\]$'; then
+  VIDEO_ID="$(echo "$1" | sed -n 's/.*\[\([A-Za-z0-9_-]*\)\].*/\1/p')"
+else
+  VIDEO_ID="$1"
+fi
+
+# Check if the video ID is empty
+if [ -z "$VIDEO_ID" ]; then
+  echo "Video ID not found."
+  exit 1
+fi
+
+# Print the YouTube URL
+echo "https://www.youtube.com/watch?v=$VIDEO_ID"

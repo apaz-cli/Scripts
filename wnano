@@ -1,0 +1,8 @@
+#!/bin/sh
+
+# Launch nano with:
+# -S : softwrap (Automatically wrap lines too long to display.)
+# -a : atblanks (Softwrap at blanks, not in the middle of a word.)
+# -0 : interface hidden
+# This leaves just you and the text.
+nano -Sa0 $@

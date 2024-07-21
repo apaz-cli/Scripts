@@ -1,0 +1,4 @@
+#!/bin/sh
+
+# Clear the screen and print nvidia-smi every second.
+watch -n 1 nvidia-smi

@@ -1,11 +1,30 @@
 #!/bin/sh
 
+if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+  echo "Usage: newscript [-p|--python] <scriptname>"
+  echo "Creates a new script with a shebang and opens it in the editor."
+  echo ""
+  echo "Options:"
+  echo "  -p, --python  Use Python shebang instead of shell shebang"
+  echo "  -h, --help    Display this help message"
+  exit 0
+fi
+
+if [ "$1" = "-p" ] || [ "$1" = "--python" ]; then
+  SHEBANG="#!/usr/bin/env python3"
+  shift
+else
+  SHEBANG="#!/bin/sh"
+fi
+
 if [ ! "$#" -eq 1 ]; then
-    echo "Usage: newscript <scriptname>"
-    exit 1
+  echo "Usage: newscript [-p|--python] <scriptname>"
+  exit 1
 fi
 
 cd ~/git/Scripts/
-if [ ! -f "$1" ]; then echo "#!/bin/sh" > "$1"; fi
+if [ ! -f "$1" ]; then 
+  echo "$SHEBANG" > "$1"
+fi
 chmod +x "$1"
 $EDITOR "$1"

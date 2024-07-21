@@ -2,6 +2,22 @@
 
 # Print the repos in the given directory, what branch they're on, and if they're clean.
 
+if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+  echo "Usage: script.sh [OPTION] [DIRECTORY]"
+  echo "Print the repos in the given directory, what branch they're on, and if they're clean."
+  echo ""
+  echo "Options:"
+  echo "  -a            Sort alphabetically (default is to sort by last modified)"
+  echo "  -h, --help    Display this help message"
+  exit 0
+fi
+
+# Print the repos, sorted by last modified.
+if [ "$1" = "-a" ]; then
+  ALPHABETICAL=1
+  shift
+fi
+
 if [ "$1" = "" ]; then
   SEARCHPATH="$(pwd)"
 else
@@ -10,14 +26,24 @@ else
     echo "Could not find folder: $SEARCHPATH";
     exit 1;
   fi
+  shift
 fi
 
 cd "$SEARCHPATH"
 
-REPOS=$(find . -maxdepth 2 -name .git -type d \
-      | cut -c 3- | rev \
-      | cut -c 5- | rev \
-      | sort -V -f)
+if [ ! "$ALPHABETICAL" = "1" ]; then
+  REPOS=$(find . -maxdepth 2 -name .git -type d \
+        | cut -c 3- | rev \
+        | cut -c 5- | rev \
+        | while read dir; do echo "$(stat -c '%Y' -- "$dir") $dir"; done \
+        | sort -n \
+        | cut -d' ' -f2-)
+else
+  REPOS=$(find . -maxdepth 2 -name .git -type d \
+        | cut -c 3- | rev \
+        | cut -c 5- | rev \
+        | sort -V -f)
+fi
 
 RED="\e[31m"
 GREEN="\e[32m"

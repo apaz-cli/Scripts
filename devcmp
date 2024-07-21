@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# Create a diff of device entries in /dev
+
+# Capture the list of devices in /dev/ initially
+initial_devices=$(ls /dev/)
+
+# Wait for the user to press Enter
+read -p "Press Enter to check /dev again, after connecting or disconnecting your hardware..."
+
+# Capture the list of devices in /dev/ after the user presses Enter
+final_devices=$(ls /dev/)
+
+# Compare the initial and final lists and display the differences
+echo "Devices added:"
+diff <(echo "$initial_devices") <(echo "$final_devices") | grep '>' | sed 's/> //'
+
+echo "Devices removed:"
+diff <(echo "$initial_devices") <(echo "$final_devices") | grep '<' | sed 's/< //'

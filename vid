@@ -1,3 +1,11 @@
 #!/bin/sh
-Thunar ~/Videos/
-kill -9 $PPID
+
+# Play a video in the terminal.
+
+# Expects one argument: the path to the video file
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 <video file>"
+    exit 1
+fi
+
+mpv --no-config --vo=tct "$1"
