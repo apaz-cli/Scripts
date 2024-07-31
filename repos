@@ -32,14 +32,14 @@ fi
 cd "$SEARCHPATH"
 
 if [ ! "$ALPHABETICAL" = "1" ]; then
-  REPOS=$(find . -maxdepth 2 -name .git -type d \
+  REPOS=$(find . -maxdepth 2 -name .git -type d 2>/dev/null \
         | cut -c 3- | rev \
         | cut -c 5- | rev \
         | while read dir; do echo "$(stat -c '%Y' -- "$dir") $dir"; done \
         | sort -n \
         | cut -d' ' -f2-)
 else
-  REPOS=$(find . -maxdepth 2 -name .git -type d \
+  REPOS=$(find . -maxdepth 2 -name .git -type d 2>/dev/null \
         | cut -c 3- | rev \
         | cut -c 5- | rev \
         | sort -V -f)
