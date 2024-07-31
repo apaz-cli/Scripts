@@ -1,0 +1,23 @@
+#!/bin/sh
+
+# Create a python virtual environment.
+# This wrapper exists literally so that I don't have to pass the . and type -m manually, or type activate manually.
+
+if [ $# -eq 0 ]; then
+    VENVNAME="."
+else
+    VENVNAME="$1"
+    shift
+fi
+
+if [ ! -d "$VENVNAME/bin" ]; then
+    python -m venv "$VENVNAME" $@
+fi
+REALVENV="$(realpath "$VENVNAME")"
+
+# Activate the venv
+. "$REALVENV/bin/activate"
+
+# Clean up variables, since this script is also sourced.
+unset VENVNAME
+unset REALVENV
