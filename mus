@@ -1,2 +1,7 @@
 #!/bin/sh
-vlc -I ncurses --no-video ~/Music/
+
+FOLDER=$1
+if [ -z "$FOLDER" ]; then
+    FOLDER="$(echo ~)/Music"
+fi
+vlc -I ncurses --no-video $FOLDER

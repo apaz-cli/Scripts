@@ -4,20 +4,20 @@
 # This wrapper exists literally so that I don't have to pass the . and type -m manually, or type activate manually.
 
 if [ $# -eq 0 ]; then
-    VENVNAME="."
+    _VENVNAME="."
 else
-    VENVNAME="$1"
+    _VENVNAME="$1"
     shift
 fi
 
-if [ ! -d "$VENVNAME/bin" ]; then
-    python -m venv "$VENVNAME" $@
+if [ ! -d "$_VENVNAME/bin" ]; then
+    python -m venv "$_VENVNAME" $@
 fi
-REALVENV="$(realpath "$VENVNAME")"
+_REALVENV="$(realpath "$_VENVNAME")"
 
 # Activate the venv
-. "$REALVENV/bin/activate"
+. "$_REALVENV/bin/activate"
 
 # Clean up variables, since this script is also sourced.
-unset VENVNAME
-unset REALVENV
+unset _VENVNAME
+unset _REALVENV

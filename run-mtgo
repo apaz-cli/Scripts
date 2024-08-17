@@ -1,0 +1,20 @@
+#!/bin/sh
+
+# Check if run-mtgo exists in /bin
+if [ ! -f /bin/run-mtgo ]; then
+    echo "Downloading run-mtgo..."
+    wget -O /tmp/run-mtgo-script https://raw.githubusercontent.com/pauleve/docker-mtgo/master/run-mtgo
+    chmod +x /tmp/run-mtgo-script
+    sudo mv /tmp/run-mtgo-script /bin/run-mtgo
+fi
+
+# Check if the user is in the `docker` group. If not, add the user and prompt restart.
+if [ $(id -Gn | grep -c docker) -eq 0 ]; then
+    echo "Adding user to docker group..."
+    sudo usermod -aG docker "$USER"
+    echo "Please restart your computer to apply changes."
+    exit 0
+fi
+
+# Run run-mtgo
+/bin/run-mtgo $@

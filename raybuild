@@ -14,4 +14,4 @@ if [ "$?" -ne 0 ]; then echo "Make failed!"; exit 1; fi
 cd "$WD"
 cp -r /tmp/raylib/build/raylib/ "$WD"
 echo "Example build command:"
-echo "cc -I./raylib/include -o raytest raytest.c raylib/libraylib.a -L./raylib/lib -lraylib -lGL -lm -lpthread -ldl -lrt -lX11"
+echo "cc -I./raylib/include -o raytest raytest.c raylib/libraylib.a -L./raylib/lib -lGL -lm -lpthread -ldl -lrt -lX11"
