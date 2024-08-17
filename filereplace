@@ -3,7 +3,23 @@ import sys
 import os
 import glob
 
-USAGE = 'Usage: filereplace [-v] <path> <pattern> <replacement>'
+USAGE = '''
+Usage: filereplace [-v] <path> <pattern> <replacement>
+
+Replace occurrences of <pattern> with <replacement> in file(s) at <path>.
+
+Arguments:
+  -v          Verbose mode. Print additional information during execution.
+  <path>      File or directory path. If a directory, processes all files recursively.
+  <pattern>   The string pattern to search for in the file(s).
+  <replacement>  The string to replace the pattern with.
+
+Examples:
+  filereplace myfile.txt "old text" "new text"
+  filereplace -v ./mydir "error" "warning"
+
+Note: This script modifies files in-place. Make sure to backup important files before use.
+'''
 
 def replace(file_path, pattern, subst, verbose=False):
     try:
