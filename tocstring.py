@@ -10,6 +10,14 @@ def file_to_c_string(input_file):
     
     return f'"{escaped_content}"'
 
+def file_to_python_string(input_file):
+    with open(input_file, 'r') as infile:
+        content = infile.read()
+    
+    escaped_content = content.replace('\\', '\\\\').replace("'", "\\'").replace('\n', '\\n')
+    
+    return f"'{escaped_content}'"
+
 if __name__ == "__main__":
     if len(sys.argv) < 2 or len(sys.argv) > 3:
         print("Usage: python tocstring.py <input_file> [output_file]")
