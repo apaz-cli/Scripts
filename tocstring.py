@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import sys
 
 def file_to_c_string(input_file):
