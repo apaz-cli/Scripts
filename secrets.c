@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <glob.h>
+#include <utime.h>
 
 #define MAX_FILENAME 256
 #define SMALL_FILE_THRESHOLD 1024 // 1 KB
