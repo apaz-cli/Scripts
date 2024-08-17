@@ -22,7 +22,7 @@ echo "This is file3 in subdir" > subdir/file3.txt
 rm -rf file1.txt file2.txt subdir
 
 # Extract the archive
-./secrets.c extract test_archive.bin "password123"
+./secrets.c extract test_archive.bin "password123" extracted
 
 # Verify the extracted files
 diff file1.txt extracted/file1.txt

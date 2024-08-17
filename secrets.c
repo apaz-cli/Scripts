@@ -323,15 +323,19 @@ static inline void extract_archive(const char *archive_name,
 
 static inline void print_usage(void) {
   fprintf(stderr, "Usage: secrets <create|extract> <archive_name> <password> [input_files_and_folders]...\n");
+  fprintf(stderr, "       secrets extract <archive_name> <password> [output_directory]\n");
 }
 
 static inline void print_help(void) {
   fprintf(stderr, "Usage: secrets [OPTIONS] <create|extract> <archive_name> <password> [input_files_and_folders]...\n");
+  fprintf(stderr, "       secrets [OPTIONS] extract <archive_name> <password> [output_directory]\n");
   fprintf(stderr, "\nOptions:\n");
   fprintf(stderr, "  --help     Display this help message and exit\n");
   fprintf(stderr, "\nModes:\n");
   fprintf(stderr, "  create     Create a new archive\n");
   fprintf(stderr, "  extract    Extract files from an existing archive\n");
+  fprintf(stderr, "\nArguments:\n");
+  fprintf(stderr, "  output_directory    Optional. Directory to extract files to (default: current directory)\n");
 }
 
 int main(int argc, char **argv) {
@@ -353,11 +357,12 @@ int main(int argc, char **argv) {
     }
     create_archive(archive_name, password, argc - 4, &argv[4]);
   } else if (strcmp(mode, "extract") == 0) {
-    if (argc != 4) {
+    if (argc < 4 || argc > 5) {
       fprintf(stderr, "Error: Incorrect number of arguments for extract mode.\n");
       return print_usage(), 1;
     }
-    extract_archive(archive_name, ".", password);
+    const char *output_dir = (argc == 5) ? argv[4] : ".";
+    extract_archive(archive_name, output_dir, password);
   } else {
     fprintf(stderr, "Invalid mode. Use 'create' or 'extract'.\n");
     return 1;
