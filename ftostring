@@ -29,8 +29,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Convert a file to a string in various programming languages.")
     parser.add_argument("input_file", help="The input file to convert")
     parser.add_argument("-o", "--output", help="The output file (if not specified, print to stdout)")
-    
-    # Create a mutually exclusive group for language options
+
     lang_group = parser.add_mutually_exclusive_group()
     lang_group.add_argument("-c", "--c", action="store_true", help="Convert to C string (default)")
     lang_group.add_argument("-p", "--python", action="store_true", help="Convert to Python string")
@@ -41,7 +40,7 @@ if __name__ == "__main__":
     if args.python:
         lang = 'python'
     else:
-        lang = 'c'  # C is the default
+        lang = 'c'
 
     result = LANGUAGES[lang](args.input_file)
 
