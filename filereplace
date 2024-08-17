@@ -1,55 +1,49 @@
 #!/usr/bin/env python
-from io import TextIOWrapper
 import sys
 import os
-import tempfile
 import glob
 
 def replace(file_path, pattern, subst, verbose=False):
-    # Create temp file, open file as bytes, try to convert to string, and skip if it can't be converted.
-    replaced = False
-    new = None
-    with open(file_path, 'rb') as old_file:
-        try:
-            b = old_file.read()
-            fstr = b.decode()
-            new = fstr.replace(pattern, subst)
-            if new != fstr:
-                replaced = True
-                if verbose:
-                    print(f'Replaced all instances of {pattern} with {subst} in {file_path}')
-        except Exception:
-            return
-
-    if replaced:
-        with open(file_path, 'wb') as new_file:
-            new_file.write(new.encode('utf-8'))
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            content = file.read()
+        
+        new_content = content.replace(pattern, subst)
+        
+        if new_content != content:
+            with open(file_path, 'w', encoding='utf-8') as file:
+                file.write(new_content)
+            if verbose:
+                print(f'Replaced all instances of "{pattern}" with "{subst}" in {file_path}')
+            return True
+        return False
+    except Exception as e:
+        print(f"Error processing {file_path}: {str(e)}")
+        return False
 
 def main():
     if len(sys.argv) < 4:
         print('Usage: filereplace [-v] <path> <pattern> <replacement>')
         sys.exit(1)
 
-    if sys.argv[1] == '-v':
+    verbose = False
+    args = sys.argv[1:]
+    if args[0] == '-v':
         verbose = True
-        sys.argv.pop(1)
+        args.pop(0)
 
-    path = sys.argv[1]
-    pattern = sys.argv[2]
-    replacement = sys.argv[3]
+    path, pattern, replacement = args
 
-    files = list(glob.iglob(path + '/**', recursive=True)) if os.path.isdir(path) else [path]
+    files = glob.glob(path + '/**', recursive=True) if os.path.isdir(path) else [path]
+    files = [f for f in files if os.path.isfile(f)]
+
     if verbose:
-        for f in files:
-            print(f)
         print(f"Found {len(files)} target files.")
 
     for file_path in files:
         if verbose:
-            print(f"Reading file {file_path}")
-        if os.path.isfile(file_path):
-            replace(file_path, pattern, replacement, verbose)
-        elif verbose:
-            print(f"Skipping over dir {file_path}.")
+            print(f"Processing file: {file_path}")
+        replace(file_path, pattern, replacement, verbose)
 
-main()
+if __name__ == "__main__":
+    main()
