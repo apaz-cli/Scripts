@@ -26,22 +26,15 @@ typedef struct {
 #define LCG_M 0xFFFFFFFF
 
 // Simple LCG-based stream cipher
-uint32_t lcg_state;
-
-uint8_t lcg_next() {
-    lcg_state = (LCG_A * lcg_state + LCG_C) & LCG_M;
-    return (uint8_t)(lcg_state >> 24);
-}
-
 void stream_crypt(char *data, size_t size, const char *password) {
-    // Inline init_lcg
-    lcg_state = 0;
+    uint32_t lcg_state = 0;
     for (size_t i = 0; i < strlen(password); i++) {
         lcg_state = (lcg_state * 31 + password[i]) & LCG_M;
     }
 
     for (size_t i = 0; i < size; i++) {
-        data[i] ^= lcg_next();
+        lcg_state = (LCG_A * lcg_state + LCG_C) & LCG_M;
+        data[i] ^= (uint8_t)(lcg_state >> 24);
     }
 }
 
