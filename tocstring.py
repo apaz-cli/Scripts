@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
+import argparse
 
 def file_to_c_string(input_file):
     with open(input_file, 'r') as infile:
@@ -19,17 +20,20 @@ def file_to_python_string(input_file):
     return f"'{escaped_content}'"
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2 or len(sys.argv) > 3:
-        print("Usage: python tocstring.py <input_file> [output_file]")
-        sys.exit(1)
-    
-    input_file = sys.argv[1]
-    c_string = file_to_c_string(input_file)
-    
-    if len(sys.argv) == 3:
-        output_file = sys.argv[2]
-        with open(output_file, 'w') as outfile:
-            outfile.write(c_string)
-        print(f"Converted {input_file} to C string in {output_file}")
+    parser = argparse.ArgumentParser(description="Convert a file to a C or Python string.")
+    parser.add_argument("input_file", help="The input file to convert")
+    parser.add_argument("-o", "--output", help="The output file (if not specified, print to stdout)")
+    parser.add_argument("-p", "--python", action="store_true", help="Convert to Python string instead of C string")
+    args = parser.parse_args()
+
+    if args.python:
+        result = file_to_python_string(args.input_file)
     else:
-        print(c_string)
+        result = file_to_c_string(args.input_file)
+
+    if args.output:
+        with open(args.output, 'w') as outfile:
+            outfile.write(result)
+        print(f"Converted {args.input_file} to {'Python' if args.python else 'C'} string in {args.output}")
+    else:
+        print(result)
