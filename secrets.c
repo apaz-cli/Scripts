@@ -58,29 +58,69 @@ void decrypt(char *data, size_t size, const char *password) {
   encrypt(data, size, password);
 }
 
-void write_metadata(FILE *archive, const FileMetadata *metadata) {
+void write_metadata(FILE *archive, const FileMetadata *metadata, const char *password) {
   size_t filename_len = strlen(metadata->filename);
-  fwrite(&filename_len, sizeof(size_t), 1, archive);
-  fwrite(metadata->filename, 1, filename_len, archive);
-  fwrite(&metadata->last_access, sizeof(time_t), 1, archive);
-  fwrite(&metadata->permissions, sizeof(mode_t), 1, archive);
-  fwrite(&metadata->size, sizeof(size_t), 1, archive);
+  size_t total_size = sizeof(size_t) + filename_len + sizeof(time_t) + sizeof(mode_t) + sizeof(size_t);
+  char *buffer = malloc(total_size);
+  if (!buffer) {
+    perror("Error allocating memory for metadata buffer");
+    exit(1);
+  }
+
+  char *ptr = buffer;
+  memcpy(ptr, &filename_len, sizeof(size_t));
+  ptr += sizeof(size_t);
+  memcpy(ptr, metadata->filename, filename_len);
+  ptr += filename_len;
+  memcpy(ptr, &metadata->last_access, sizeof(time_t));
+  ptr += sizeof(time_t);
+  memcpy(ptr, &metadata->permissions, sizeof(mode_t));
+  ptr += sizeof(mode_t);
+  memcpy(ptr, &metadata->size, sizeof(size_t));
+
+  encrypt(buffer, total_size, password);
+  fwrite(&total_size, sizeof(size_t), 1, archive);
+  fwrite(buffer, 1, total_size, archive);
+
+  free(buffer);
 }
 
 // Read metadata from file
-void read_metadata(FILE *archive, FileMetadata *metadata) {
+void read_metadata(FILE *archive, FileMetadata *metadata, const char *password) {
+  size_t total_size;
+  fread(&total_size, sizeof(size_t), 1, archive);
+
+  char *buffer = malloc(total_size);
+  if (!buffer) {
+    perror("Error allocating memory for metadata buffer");
+    exit(1);
+  }
+
+  fread(buffer, 1, total_size, archive);
+  decrypt(buffer, total_size, password);
+
+  char *ptr = buffer;
   size_t filename_len;
-  fread(&filename_len, sizeof(size_t), 1, archive);
+  memcpy(&filename_len, ptr, sizeof(size_t));
+  ptr += sizeof(size_t);
+
   metadata->filename = malloc(filename_len + 1);
   if (!metadata->filename) {
     perror("Error allocating memory for filename");
+    free(buffer);
     exit(1);
   }
-  fread(metadata->filename, 1, filename_len, archive);
+  memcpy(metadata->filename, ptr, filename_len);
   metadata->filename[filename_len] = '\0';
-  fread(&metadata->last_access, sizeof(time_t), 1, archive);
-  fread(&metadata->permissions, sizeof(mode_t), 1, archive);
-  fread(&metadata->size, sizeof(size_t), 1, archive);
+  ptr += filename_len;
+
+  memcpy(&metadata->last_access, ptr, sizeof(time_t));
+  ptr += sizeof(time_t);
+  memcpy(&metadata->permissions, ptr, sizeof(mode_t));
+  ptr += sizeof(mode_t);
+  memcpy(&metadata->size, ptr, sizeof(size_t));
+
+  free(buffer);
 }
 
 // Add a file to the archive
@@ -109,7 +149,7 @@ void add_file(FILE *archive, const char *filename, const char *password) {
   metadata.permissions = st.st_mode;
   metadata.size = st.st_size;
 
-  write_metadata(archive, &metadata);
+  write_metadata(archive, &metadata, password);
 
   char *buffer = malloc(st.st_size);
   if (!buffer) {
@@ -162,7 +202,7 @@ int read_dummy(FILE *archive, const char *password) {
 
 void extract_file(FILE *archive, const char *output_dir, const char *password) {
   FileMetadata metadata;
-  read_metadata(archive, &metadata);
+  read_metadata(archive, &metadata, password);
 
   char *output_path =
       malloc(strlen(output_dir) + strlen(metadata.filename) + 2);
