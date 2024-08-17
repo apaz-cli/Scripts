@@ -18,12 +18,36 @@ typedef struct {
   size_t size;
 } FileMetadata;
 
+#include <stdint.h>
+
+// Simple pseudo-random number generator
+uint32_t xorshift32(uint32_t *state) {
+    uint32_t x = *state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *state = x;
+    return x;
+}
+
 void encrypt(char *data, size_t size, const char *password) {
-  
+    uint32_t state = 0;
+    size_t password_len = strlen(password);
+    
+    // Initialize the PRNG state using the password
+    for (size_t i = 0; i < password_len; i++) {
+        state = state * 31 + password[i];
+    }
+    
+    // XOR each byte of data with a pseudo-random byte
+    for (size_t i = 0; i < size; i++) {
+        data[i] ^= (char)(xorshift32(&state) & 0xFF);
+    }
 }
 
 void decrypt(char *data, size_t size, const char *password) {
-  
+    // Decryption is the same as encryption for this method
+    encrypt(data, size, password);
 }
 
 void write_metadata(FILE *archive, const FileMetadata *metadata) {
