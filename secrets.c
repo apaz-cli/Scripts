@@ -4,7 +4,6 @@ TMP="$(mktemp -d)"; cc -o "$TMP/a.out" -x c "$0" && "$TMP/a.out" $@; RVAL=$?; rm
 #endif
 
 #include <fcntl.h>
-#include <glob.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -269,8 +268,9 @@ static inline void extract_file(FILE *archive, const char *output_dir,
 
 // Create an archive
 static inline void create_archive(const char *archive_name,
-                                  const char *input_pattern,
-                                  const char *password) {
+                                  const char *password,
+                                  int num_inputs,
+                                  char **input_files) {
   FILE *archive = fopen(archive_name, "wb");
   if (!archive) {
     perror("Error creating archive");
@@ -280,19 +280,10 @@ static inline void create_archive(const char *archive_name,
   // Write dummy value for password verification
   write_dummy(archive, password);
 
-  glob_t globbuf;
-  int glob_flags = GLOB_TILDE | GLOB_NOSORT;
-  if (glob(input_pattern, glob_flags, NULL, &globbuf) != 0) {
-    perror("Error in glob");
-    fclose(archive);
-    return;
+  for (int i = 0; i < num_inputs; i++) {
+    add_file(archive, input_files[i], password);
   }
 
-  for (size_t i = 0; i < globbuf.gl_pathc; i++) {
-    add_file(archive, globbuf.gl_pathv[i], password);
-  }
-
-  globfree(&globbuf);
   fclose(archive);
 }
 
@@ -328,13 +319,11 @@ static inline void extract_archive(const char *archive_name,
 }
 
 static inline void print_usage(void) {
-  fprintf(stderr, "Usage: secrets <create|extract> <archive_name> "
-                  "<input_pattern|output_dir> <password>\n");
+  fprintf(stderr, "Usage: secrets <create|extract> <archive_name> <password> [input_files_and_folders]...\n");
 }
 
 static inline void print_help(void) {
-  fprintf(stderr, "Usage: secrets [OPTIONS] <create|extract> <archive_name> "
-                  "<input_pattern|output_dir> <password>\n");
+  fprintf(stderr, "Usage: secrets [OPTIONS] <create|extract> <archive_name> <password> [input_files_and_folders]...\n");
   fprintf(stderr, "\nOptions:\n");
   fprintf(stderr, "  --help     Display this help message and exit\n");
   fprintf(stderr, "\nModes:\n");
@@ -343,7 +332,7 @@ static inline void print_help(void) {
 }
 
 int main(int argc, char **argv) {
-  if (argc < 5)
+  if (argc < 4)
     return print_usage(), 1;
 
   for (int i = 1; i < argc; i++)
@@ -352,13 +341,20 @@ int main(int argc, char **argv) {
 
   const char *mode = argv[1];
   const char *archive_name = argv[2];
-  const char *pattern_or_dir = argv[3];
-  const char *password = argv[4];
+  const char *password = argv[3];
 
   if (strcmp(mode, "create") == 0) {
-    create_archive(archive_name, pattern_or_dir, password);
+    if (argc < 5) {
+      fprintf(stderr, "Error: No input files specified for create mode.\n");
+      return print_usage(), 1;
+    }
+    create_archive(archive_name, password, argc - 4, &argv[4]);
   } else if (strcmp(mode, "extract") == 0) {
-    extract_archive(archive_name, pattern_or_dir, password);
+    if (argc != 4) {
+      fprintf(stderr, "Error: Incorrect number of arguments for extract mode.\n");
+      return print_usage(), 1;
+    }
+    extract_archive(archive_name, ".", password);
   } else {
     fprintf(stderr, "Invalid mode. Use 'create' or 'extract'.\n");
     return 1;
