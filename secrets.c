@@ -9,6 +9,7 @@ TMP="$(mktemp -d)"; cc -o "$TMP/a.out" -x c "$0" && "$TMP/a.out" $@; RVAL=$?; rm
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 #include <utime.h>
@@ -221,6 +222,22 @@ static inline void extract_file(FILE *archive, const char *output_dir,
     return;
   }
   sprintf(output_path, "%s/%s", output_dir, metadata.filename);
+
+  // Create directories if they don't exist
+  char *dir_path = strdup(output_path);
+  char *p = strrchr(dir_path, '/');
+  if (p) {
+    *p = '\0';
+    for (char *q = dir_path + 1; *q; q++) {
+      if (*q == '/') {
+        *q = '\0';
+        mkdir(dir_path, 0755);
+        *q = '/';
+      }
+    }
+    mkdir(dir_path, 0755);
+  }
+  free(dir_path);
 
   FILE *output = fopen(output_path, "wb");
   if (!output) {
