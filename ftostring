@@ -19,21 +19,35 @@ def file_to_python_string(input_file):
     
     return f"'{escaped_content}'"
 
+# Dictionary of languages and their corresponding conversion functions
+LANGUAGES = {
+    'c': file_to_c_string,
+    'python': file_to_python_string,
+}
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Convert a file to a C or Python string.")
+    parser = argparse.ArgumentParser(description="Convert a file to a string in various programming languages.")
     parser.add_argument("input_file", help="The input file to convert")
     parser.add_argument("-o", "--output", help="The output file (if not specified, print to stdout)")
-    parser.add_argument("-p", "--python", action="store_true", help="Convert to Python string instead of C string")
+    
+    # Create a mutually exclusive group for language options
+    lang_group = parser.add_mutually_exclusive_group()
+    lang_group.add_argument("-c", "--c", action="store_true", help="Convert to C string (default)")
+    lang_group.add_argument("-p", "--python", action="store_true", help="Convert to Python string")
+    
     args = parser.parse_args()
 
+    # Determine which language to use
     if args.python:
-        result = file_to_python_string(args.input_file)
+        lang = 'python'
     else:
-        result = file_to_c_string(args.input_file)
+        lang = 'c'  # C is the default
+
+    result = LANGUAGES[lang](args.input_file)
 
     if args.output:
         with open(args.output, 'w') as outfile:
             outfile.write(result)
-        print(f"Converted {args.input_file} to {'Python' if args.python else 'C'} string in {args.output}")
+        print(f"Converted {args.input_file} to {lang.capitalize()} string in {args.output}")
     else:
         print(result)
