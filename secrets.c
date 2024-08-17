@@ -10,7 +10,7 @@
 #include <utime.h>
 
 #define SMALL_FILE_THRESHOLD 1024 // 1 KB
-#define DUMMY_SIZE 64 // Size of the dummy value for password verification
+#define DUMMY_BITS 20
 
 typedef struct {
   char *filename;
@@ -55,7 +55,6 @@ void encrypt(char *data, size_t size, const char *password) {
 }
 
 void decrypt(char *data, size_t size, const char *password) {
-  // XOR is its own inverse
   encrypt(data, size, password);
 }
 
@@ -142,20 +141,20 @@ void add_file(FILE *archive, const char *filename, const char *password) {
 // Extract a file from the archive
 // Write dummy value for password verification
 void write_dummy(FILE *archive, const char *password) {
-  char dummy[DUMMY_SIZE] = {0}; // Initialize with zeros
-  encrypt(dummy, DUMMY_SIZE, password);
-  fwrite(dummy, 1, DUMMY_SIZE, archive);
+  char dummy[DUMMY_BITS] = {0}; // Initialize with zeros
+  encrypt(dummy, DUMMY_BITS, password);
+  fwrite(dummy, 1, DUMMY_BITS, archive);
 }
 
 // Read and verify dummy value
 int read_dummy(FILE *archive, const char *password) {
-  char dummy[DUMMY_SIZE];
-  if (fread(dummy, 1, DUMMY_SIZE, archive) != DUMMY_SIZE) {
+  char dummy[DUMMY_BITS];
+  if (fread(dummy, 1, DUMMY_BITS, archive) != DUMMY_BITS) {
     perror("Error reading dummy value");
     return 0;
   }
-  decrypt(dummy, DUMMY_SIZE, password);
-  for (int i = 0; i < DUMMY_SIZE; i++) {
+  decrypt(dummy, DUMMY_BITS, password);
+  for (int i = 0; i < DUMMY_BITS; i++) {
     if (dummy[i] != 0) {
       return 0; // Decryption failed
     }
@@ -256,14 +255,13 @@ void extract_archive(const char *archive_name, const char *output_dir,
   FILE *archive = fopen(archive_name, "rb");
   if (!archive) {
     perror("Error opening archive");
-    return;
+    exit(1);
   }
 
   // Verify password using dummy value
   if (!read_dummy(archive, password)) {
-    fprintf(stderr, "Error: Incorrect password or corrupted archive\n");
-    fclose(archive);
-    return;
+    fprintf(stderr, "Error: Incorrect password or corrupted archive.\n");
+    exit(1);
   }
 
   mkdir(output_dir, 0755);
