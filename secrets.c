@@ -20,18 +20,18 @@ typedef struct {
 
 #include <stdint.h>
 
-// Simple pseudo-random number generator
-uint32_t xorshift32(uint32_t *state) {
-    uint32_t x = *state;
+// 64-bit xorshift pseudo-random number generator
+uint64_t xorshift64(uint64_t *state) {
+    uint64_t x = *state;
     x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
+    x ^= x >> 7;
+    x ^= x << 17;
     *state = x;
     return x;
 }
 
 void encrypt(char *data, size_t size, const char *password) {
-    uint32_t state = 0;
+    uint64_t state = 0;
     size_t password_len = strlen(password);
     
     // Initialize the PRNG state using the password
@@ -41,7 +41,7 @@ void encrypt(char *data, size_t size, const char *password) {
     
     // XOR each byte of data with a pseudo-random byte
     for (size_t i = 0; i < size; i++) {
-        data[i] ^= (char)(xorshift32(&state) & 0xFF);
+        data[i] ^= (char)(xorshift64(&state) & 0xFF);
     }
 }
 
