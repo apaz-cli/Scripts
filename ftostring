@@ -38,12 +38,10 @@ if __name__ == "__main__":
 
     # Determine which language to use
     lang = next((lang for lang, value in vars(args).items() if value and lang in LANGUAGES), 'c')
-
     result = LANGUAGES[lang](args.input_file)
 
     if args.output:
         with open(args.output, 'w') as outfile:
             outfile.write(result)
-        print(f"Converted {args.input_file} to {lang.capitalize()} string in {args.output}")
     else:
         print(result)
