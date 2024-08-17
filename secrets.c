@@ -10,6 +10,7 @@
 #include <utime.h>
 
 #define SMALL_FILE_THRESHOLD 1024 // 1 KB
+#define DUMMY_SIZE 64 // Size of the dummy value for password verification
 
 typedef struct {
   char *filename;
@@ -139,6 +140,29 @@ void add_file(FILE *archive, const char *filename, const char *password) {
 }
 
 // Extract a file from the archive
+// Write dummy value for password verification
+void write_dummy(FILE *archive, const char *password) {
+  char dummy[DUMMY_SIZE] = {0}; // Initialize with zeros
+  encrypt(dummy, DUMMY_SIZE, password);
+  fwrite(dummy, 1, DUMMY_SIZE, archive);
+}
+
+// Read and verify dummy value
+int read_dummy(FILE *archive, const char *password) {
+  char dummy[DUMMY_SIZE];
+  if (fread(dummy, 1, DUMMY_SIZE, archive) != DUMMY_SIZE) {
+    perror("Error reading dummy value");
+    return 0;
+  }
+  decrypt(dummy, DUMMY_SIZE, password);
+  for (int i = 0; i < DUMMY_SIZE; i++) {
+    if (dummy[i] != 0) {
+      return 0; // Decryption failed
+    }
+  }
+  return 1; // Decryption succeeded
+}
+
 void extract_file(FILE *archive, const char *output_dir, const char *password) {
   FileMetadata metadata;
   read_metadata(archive, &metadata);
@@ -207,6 +231,9 @@ void create_archive(const char *archive_name, const char *input_pattern,
     return;
   }
 
+  // Write dummy value for password verification
+  write_dummy(archive, password);
+
   glob_t globbuf;
   int glob_flags = GLOB_TILDE | GLOB_NOSORT;
   if (glob(input_pattern, glob_flags, NULL, &globbuf) != 0) {
@@ -229,6 +256,13 @@ void extract_archive(const char *archive_name, const char *output_dir,
   FILE *archive = fopen(archive_name, "rb");
   if (!archive) {
     perror("Error opening archive");
+    return;
+  }
+
+  // Verify password using dummy value
+  if (!read_dummy(archive, password)) {
+    fprintf(stderr, "Error: Incorrect password or corrupted archive\n");
+    fclose(archive);
     return;
   }
 
