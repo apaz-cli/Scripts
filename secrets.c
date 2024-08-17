@@ -20,34 +20,42 @@ typedef struct {
 
 #include <stdint.h>
 
-// 64-bit xorshift pseudo-random number generator
-uint64_t xorshift64(uint64_t *state) {
-    uint64_t x = *state;
-    x ^= x << 13;
-    x ^= x >> 7;
-    x ^= x << 17;
-    *state = x;
-    return x;
+#define ROTL(d, lrot) ((d << (lrot)) | (d >> (8 * sizeof(d) - (lrot))))
+
+typedef struct {
+  uint64_t wState, xState, yState, zState;
+} RomuQuad;
+
+uint64_t romuQuad_random(RomuQuad *rq) {
+  uint64_t wp = rq->wState, xp = rq->xState, yp = rq->yState, zp = rq->zState;
+  rq->wState = 15241094284759029579u * zp; // a-mult
+  rq->xState = zp + ROTL(wp, 52);          // b-rotl, c-add
+  rq->yState = yp - xp;                    // d-sub
+  rq->zState = yp + wp;                    // e-add
+  rq->zState = ROTL(rq->zState, 19);       // f-rotl
+  return xp;
 }
 
 void encrypt(char *data, size_t size, const char *password) {
-    uint64_t state = 0;
-    size_t password_len = strlen(password);
-    
-    // Initialize the PRNG state using the password
-    for (size_t i = 0; i < password_len; i++) {
-        state = state * 31 + password[i];
-    }
-    
-    // XOR each byte of data with a pseudo-random byte
-    for (size_t i = 0; i < size; i++) {
-        data[i] ^= (char)(xorshift64(&state) & 0xFF);
-    }
+  RomuQuad state = {0, 0, 0, 0};
+  size_t password_len = strlen(password);
+
+  // Init PRNG state using password
+  for (size_t i = 0; i < password_len; i++) {
+    state.wState ^= (uint64_t)password[i] << (8 * ((i + 0) % 8));
+    state.xState ^= (uint64_t)password[i] << (8 * ((i + 1) % 8));
+    state.yState ^= (uint64_t)password[i] << (8 * ((i + 2) % 8));
+    state.zState ^= (uint64_t)password[i] << (8 * ((i + 3) % 8));
+  }
+
+  // XOR each byte of data with a pseudo-random byte
+  for (size_t i = 0; i < size; i++)
+    data[i] ^= (char)(romuQuad_random(&state) & 0xFF);
 }
 
 void decrypt(char *data, size_t size, const char *password) {
-    // Decryption is the same as encryption for this method
-    encrypt(data, size, password);
+  // XOR is its own inverse
+  encrypt(data, size, password);
 }
 
 void write_metadata(FILE *archive, const FileMetadata *metadata) {
@@ -135,7 +143,8 @@ void extract_file(FILE *archive, const char *output_dir, const char *password) {
   FileMetadata metadata;
   read_metadata(archive, &metadata);
 
-  char *output_path = malloc(strlen(output_dir) + strlen(metadata.filename) + 2);
+  char *output_path =
+      malloc(strlen(output_dir) + strlen(metadata.filename) + 2);
   if (!output_path) {
     perror("Error allocating memory for output path");
     free(metadata.filename);
