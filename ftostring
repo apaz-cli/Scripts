@@ -3,27 +3,19 @@
 import sys
 import argparse
 
-def file_to_c_string(input_file: str) -> str:
-    with open(input_file, 'r') as infile:
-        content = infile.read()
-    
+def to_c_string(content: str) -> str:
     escaped_content = content.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
-    
     return f'"{escaped_content}"'
 
-def file_to_python_string(input_file: str) -> str:
-    with open(input_file, 'r') as infile:
-        content = infile.read()
-    
+def to_python_string(content: str) -> str:
     # Use repr() to handle most of the escaping, then remove the quotes added by repr()
     escaped_content = repr(content)[1:-1]
-    
     return f'"{escaped_content}"'
 
 # Dictionary of languages and their corresponding conversion functions
 LANGUAGES = {
-    'c': file_to_c_string,
-    'python': file_to_python_string,
+    'c': to_c_string,
+    'python': to_python_string,
 }
 
 if __name__ == "__main__":
@@ -37,9 +29,13 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
 
+    # Read the input file
+    with open(args.input_file, 'r') as infile:
+        content = infile.read()
+
     # Determine which language to use
     lang = next((lang for lang, value in vars(args).items() if value and lang in LANGUAGES), 'c')
-    result = LANGUAGES[lang](args.input_file)
+    result = LANGUAGES[lang](content)
 
     if args.output:
         with open(args.output, 'w') as outfile:
