@@ -3,7 +3,7 @@
 import sys
 import argparse
 
-def file_to_c_string(input_file):
+def file_to_c_string(input_file: str) -> str:
     with open(input_file, 'r') as infile:
         content = infile.read()
     
@@ -11,17 +11,14 @@ def file_to_c_string(input_file):
     
     return f'"{escaped_content}"'
 
-def file_to_python_string(input_file):
+def file_to_python_string(input_file: str) -> str:
     with open(input_file, 'r') as infile:
         content = infile.read()
     
     # Use repr() to handle most of the escaping, then remove the quotes added by repr()
     escaped_content = repr(content)[1:-1]
     
-    # Replace double quotes with single quotes for consistency
-    escaped_content = escaped_content.replace('"', "'")
-    
-    return f"'{escaped_content}'"
+    return f'"{escaped_content}"'
 
 # Dictionary of languages and their corresponding conversion functions
 LANGUAGES = {
