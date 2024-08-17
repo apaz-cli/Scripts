@@ -7,7 +7,7 @@ TEST_DIR=$(mktemp -d)
 cd "$TEST_DIR"
 
 # Copy secrets.c to the test directory
-cp ../secrets.c .
+cp ~/git/Scripts/secrets.c .
 
 # Create some test files
 echo "This is file1" > file1.txt
