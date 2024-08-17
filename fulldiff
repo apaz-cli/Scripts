@@ -1,0 +1,3 @@
+#!/bin/sh
+
+diff --color=always -U9999999999999999999 $@ | less -R
