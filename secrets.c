@@ -8,7 +8,6 @@
 #include <time.h>
 #include <unistd.h>
 #include <utime.h>
-#include <limits.h>
 
 #define SMALL_FILE_THRESHOLD 1024 // 1 KB
 
@@ -19,35 +18,14 @@ typedef struct {
   size_t size;
 } FileMetadata;
 
-// LCG parameters
-#define LCG_A 1664525
-#define LCG_C 1013904223
-#define LCG_M 0xFFFFFFFF
-
-// Simple LCG-based stream cipher
-void stream_crypt(char *data, size_t size, const char *password) {
-  uint32_t lcg_state = 0;
-  for (size_t i = 0; i < strlen(password); i++) {
-    lcg_state = (lcg_state * 31 + password[i]) & LCG_M;
-  }
-
-  for (size_t i = 0; i < size; i++) {
-    lcg_state = (LCG_A * lcg_state + LCG_C) & LCG_M;
-    data[i] ^= (uint8_t)(lcg_state >> 24);
-  }
-}
-
-// Encryption function
 void encrypt(char *data, size_t size, const char *password) {
-  stream_crypt(data, size, password);
+  
 }
 
-// Decryption function (identical to encryption due to XOR properties)
 void decrypt(char *data, size_t size, const char *password) {
-  stream_crypt(data, size, password);
+  
 }
 
-// Write metadata to file
 void write_metadata(FILE *archive, const FileMetadata *metadata) {
   size_t filename_len = strlen(metadata->filename);
   fwrite(&filename_len, sizeof(size_t), 1, archive);
