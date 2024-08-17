@@ -37,10 +37,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Determine which language to use
-    if args.python:
-        lang = 'python'
-    else:
-        lang = 'c'
+    lang = next((lang for lang, value in vars(args).items() if value and lang in LANGUAGES), 'c')
 
     result = LANGUAGES[lang](args.input_file)
 
