@@ -1,3 +1,8 @@
+#if 0
+#This is a shebang.
+TMP="$(mktemp -d)"; cc -o "$TMP/a.out" -x c "$0" && "$TMP/a.out" $@; RVAL=$?; rm -rf "$TMP"; exit $RVAL
+#endif
+
 #include <fcntl.h>
 #include <glob.h>
 #include <stdint.h>
@@ -27,7 +32,7 @@ typedef struct {
   uint64_t wState, xState, yState, zState;
 } RomuQuad;
 
-uint64_t romuQuad_random(RomuQuad *rq) {
+static inline uint64_t romuQuad_random(RomuQuad *rq) {
   uint64_t wp = rq->wState, xp = rq->xState, yp = rq->yState, zp = rq->zState;
   rq->wState = 15241094284759029579u * zp; // a-mult
   rq->xState = zp + ROTL(wp, 52);          // b-rotl, c-add
@@ -37,7 +42,7 @@ uint64_t romuQuad_random(RomuQuad *rq) {
   return xp;
 }
 
-void encrypt(char *data, size_t size, const char *password) {
+static inline void encrypt(char *data, size_t size, const char *password) {
   RomuQuad state = {0, 0, 0, 0};
   size_t password_len = strlen(password);
 
@@ -54,13 +59,15 @@ void encrypt(char *data, size_t size, const char *password) {
     data[i] ^= (char)(romuQuad_random(&state) & 0xFF);
 }
 
-void decrypt(char *data, size_t size, const char *password) {
+static inline void decrypt(char *data, size_t size, const char *password) {
   encrypt(data, size, password);
 }
 
-void write_metadata(FILE *archive, const FileMetadata *metadata, const char *password) {
+static inline void write_metadata(FILE *archive, const FileMetadata *metadata,
+                                  const char *password) {
   size_t filename_len = strlen(metadata->filename);
-  size_t total_size = sizeof(size_t) + filename_len + sizeof(time_t) + sizeof(mode_t) + sizeof(size_t);
+  size_t total_size = sizeof(size_t) + filename_len + sizeof(time_t) +
+                      sizeof(mode_t) + sizeof(size_t);
   char *buffer = malloc(total_size);
   if (!buffer) {
     perror("Error allocating memory for metadata buffer");
@@ -86,7 +93,8 @@ void write_metadata(FILE *archive, const FileMetadata *metadata, const char *pas
 }
 
 // Read metadata from file
-void read_metadata(FILE *archive, FileMetadata *metadata, const char *password) {
+static inline void read_metadata(FILE *archive, FileMetadata *metadata,
+                                 const char *password) {
   size_t total_size;
   fread(&total_size, sizeof(size_t), 1, archive);
 
@@ -124,7 +132,8 @@ void read_metadata(FILE *archive, FileMetadata *metadata, const char *password) 
 }
 
 // Add a file to the archive
-void add_file(FILE *archive, const char *filename, const char *password) {
+static inline void add_file(FILE *archive, const char *filename,
+                            const char *password) {
   FILE *input = fopen(filename, "rb");
   if (!input) {
     perror("Error opening input file");
@@ -178,14 +187,14 @@ void add_file(FILE *archive, const char *filename, const char *password) {
 
 // Extract a file from the archive
 // Write dummy value for password verification
-void write_dummy(FILE *archive, const char *password) {
+static inline void write_dummy(FILE *archive, const char *password) {
   char dummy[DUMMY_BITS] = {0}; // Initialize with zeros
   encrypt(dummy, DUMMY_BITS, password);
   fwrite(dummy, 1, DUMMY_BITS, archive);
 }
 
 // Read and verify dummy value
-int read_dummy(FILE *archive, const char *password) {
+static inline int read_dummy(FILE *archive, const char *password) {
   char dummy[DUMMY_BITS];
   if (fread(dummy, 1, DUMMY_BITS, archive) != DUMMY_BITS) {
     perror("Error reading dummy value");
@@ -200,7 +209,8 @@ int read_dummy(FILE *archive, const char *password) {
   return 1; // Decryption succeeded
 }
 
-void extract_file(FILE *archive, const char *output_dir, const char *password) {
+static inline void extract_file(FILE *archive, const char *output_dir,
+                                const char *password) {
   FileMetadata metadata;
   read_metadata(archive, &metadata, password);
 
@@ -258,8 +268,9 @@ void extract_file(FILE *archive, const char *output_dir, const char *password) {
 }
 
 // Create an archive
-void create_archive(const char *archive_name, const char *input_pattern,
-                    const char *password) {
+static inline void create_archive(const char *archive_name,
+                                  const char *input_pattern,
+                                  const char *password) {
   FILE *archive = fopen(archive_name, "wb");
   if (!archive) {
     perror("Error creating archive");
@@ -286,8 +297,9 @@ void create_archive(const char *archive_name, const char *input_pattern,
 }
 
 // Extract files from an archive
-void extract_archive(const char *archive_name, const char *output_dir,
-                     const char *password) {
+static inline void extract_archive(const char *archive_name,
+                                   const char *output_dir,
+                                   const char *password) {
   FILE *archive = fopen(archive_name, "rb");
   if (!archive) {
     perror("Error opening archive");
@@ -315,18 +327,14 @@ void extract_archive(const char *archive_name, const char *output_dir,
   fclose(archive);
 }
 
-void print_usage(const char *argv_zero) {
-  fprintf(stderr,
-          "Usage: %s <create|extract> <archive_name> "
-          "<input_pattern|output_dir> <password>\n",
-          argv_zero);
+static inline void print_usage(void) {
+  fprintf(stderr, "Usage: secrets <create|extract> <archive_name> "
+                  "<input_pattern|output_dir> <password>\n");
 }
 
-void print_help(const char *program_name) {
-  fprintf(stderr,
-          "Usage: %s [OPTIONS] <create|extract> <archive_name> "
-          "<input_pattern|output_dir> <password>\n",
-          program_name);
+static inline void print_help(void) {
+  fprintf(stderr, "Usage: secrets [OPTIONS] <create|extract> <archive_name> "
+                  "<input_pattern|output_dir> <password>\n");
   fprintf(stderr, "\nOptions:\n");
   fprintf(stderr, "  --help     Display this help message and exit\n");
   fprintf(stderr, "\nModes:\n");
@@ -336,11 +344,11 @@ void print_help(const char *program_name) {
 
 int main(int argc, char **argv) {
   if (argc < 5)
-    return print_usage(argv[0]), 1;
+    return print_usage(), 1;
 
   for (int i = 1; i < argc; i++)
     if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0)
-      return print_help(argv[0]), 0;
+      return print_help(), 0;
 
   const char *mode = argv[1];
   const char *archive_name = argv[2];
