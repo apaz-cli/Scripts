@@ -128,9 +128,7 @@ void add_file(FILE *archive, const char *filename, const char *password) {
     return;
   }
 
-  if (metadata.size <= SMALL_FILE_THRESHOLD) {
-    encrypt(buffer, bytes_read, password);
-  }
+  encrypt(buffer, bytes_read, password);
   fwrite(buffer, 1, bytes_read, archive);
 
   free(buffer);
@@ -202,9 +200,7 @@ void extract_file(FILE *archive, const char *output_dir, const char *password) {
     return;
   }
 
-  if (metadata.size <= SMALL_FILE_THRESHOLD) {
-    decrypt(buffer, bytes_read, password);
-  }
+  decrypt(buffer, bytes_read, password);
   fwrite(buffer, 1, bytes_read, output);
 
   fclose(output);
