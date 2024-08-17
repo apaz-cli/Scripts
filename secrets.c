@@ -8,13 +8,12 @@
 #include <time.h>
 #include <unistd.h>
 #include <utime.h>
+#include <limits.h>
 
-#define MAX_FILENAME 256
 #define SMALL_FILE_THRESHOLD 1024 // 1 KB
-#define BUFFER_SIZE 4096
 
 typedef struct {
-  char filename[MAX_FILENAME];
+  char *filename;
   time_t last_access;
   mode_t permissions;
   size_t size;
@@ -50,12 +49,28 @@ void decrypt(char *data, size_t size, const char *password) {
 
 // Write metadata to file
 void write_metadata(FILE *archive, const FileMetadata *metadata) {
-  fwrite(metadata, sizeof(FileMetadata), 1, archive);
+  size_t filename_len = strlen(metadata->filename);
+  fwrite(&filename_len, sizeof(size_t), 1, archive);
+  fwrite(metadata->filename, 1, filename_len, archive);
+  fwrite(&metadata->last_access, sizeof(time_t), 1, archive);
+  fwrite(&metadata->permissions, sizeof(mode_t), 1, archive);
+  fwrite(&metadata->size, sizeof(size_t), 1, archive);
 }
 
 // Read metadata from file
 void read_metadata(FILE *archive, FileMetadata *metadata) {
-  fread(metadata, sizeof(FileMetadata), 1, archive);
+  size_t filename_len;
+  fread(&filename_len, sizeof(size_t), 1, archive);
+  metadata->filename = malloc(filename_len + 1);
+  if (!metadata->filename) {
+    perror("Error allocating memory for filename");
+    exit(1);
+  }
+  fread(metadata->filename, 1, filename_len, archive);
+  metadata->filename[filename_len] = '\0';
+  fread(&metadata->last_access, sizeof(time_t), 1, archive);
+  fread(&metadata->permissions, sizeof(mode_t), 1, archive);
+  fread(&metadata->size, sizeof(size_t), 1, archive);
 }
 
 // Add a file to the archive
@@ -74,22 +89,42 @@ void add_file(FILE *archive, const char *filename, const char *password) {
   }
 
   FileMetadata metadata;
-  strncpy(metadata.filename, filename, MAX_FILENAME);
+  metadata.filename = strdup(filename);
+  if (!metadata.filename) {
+    perror("Error allocating memory for filename");
+    fclose(input);
+    return;
+  }
   metadata.last_access = st.st_atime;
   metadata.permissions = st.st_mode;
   metadata.size = st.st_size;
 
   write_metadata(archive, &metadata);
 
-  char buffer[BUFFER_SIZE];
-  size_t bytes_read;
-  while ((bytes_read = fread(buffer, 1, BUFFER_SIZE, input)) > 0) {
-    if (metadata.size <= SMALL_FILE_THRESHOLD) {
-      encrypt(buffer, bytes_read, password);
-    }
-    fwrite(buffer, 1, bytes_read, archive);
+  char *buffer = malloc(st.st_size);
+  if (!buffer) {
+    perror("Error allocating memory for file buffer");
+    free(metadata.filename);
+    fclose(input);
+    return;
   }
 
+  size_t bytes_read = fread(buffer, 1, st.st_size, input);
+  if (bytes_read != st.st_size) {
+    perror("Error reading file");
+    free(buffer);
+    free(metadata.filename);
+    fclose(input);
+    return;
+  }
+
+  if (metadata.size <= SMALL_FILE_THRESHOLD) {
+    encrypt(buffer, bytes_read, password);
+  }
+  fwrite(buffer, 1, bytes_read, archive);
+
+  free(buffer);
+  free(metadata.filename);
   fclose(input);
 }
 
@@ -98,29 +133,45 @@ void extract_file(FILE *archive, const char *output_dir, const char *password) {
   FileMetadata metadata;
   read_metadata(archive, &metadata);
 
-  char output_path[MAX_FILENAME * 2];
-  snprintf(output_path, sizeof(output_path), "%s/%s", output_dir,
-           metadata.filename);
+  char *output_path = malloc(strlen(output_dir) + strlen(metadata.filename) + 2);
+  if (!output_path) {
+    perror("Error allocating memory for output path");
+    free(metadata.filename);
+    return;
+  }
+  sprintf(output_path, "%s/%s", output_dir, metadata.filename);
 
   FILE *output = fopen(output_path, "wb");
   if (!output) {
     perror("Error opening output file");
+    free(output_path);
+    free(metadata.filename);
     return;
   }
 
-  char buffer[BUFFER_SIZE];
-  size_t bytes_read;
-  size_t remaining = metadata.size;
-  while (remaining > 0 &&
-         (bytes_read = fread(buffer, 1,
-                             BUFFER_SIZE > remaining ? remaining : BUFFER_SIZE,
-                             archive)) > 0) {
-    if (metadata.size <= SMALL_FILE_THRESHOLD) {
-      decrypt(buffer, bytes_read, password);
-    }
-    fwrite(buffer, 1, bytes_read, output);
-    remaining -= bytes_read;
+  char *buffer = malloc(metadata.size);
+  if (!buffer) {
+    perror("Error allocating memory for file buffer");
+    fclose(output);
+    free(output_path);
+    free(metadata.filename);
+    return;
   }
+
+  size_t bytes_read = fread(buffer, 1, metadata.size, archive);
+  if (bytes_read != metadata.size) {
+    perror("Error reading from archive");
+    free(buffer);
+    fclose(output);
+    free(output_path);
+    free(metadata.filename);
+    return;
+  }
+
+  if (metadata.size <= SMALL_FILE_THRESHOLD) {
+    decrypt(buffer, bytes_read, password);
+  }
+  fwrite(buffer, 1, bytes_read, output);
 
   fclose(output);
 
@@ -130,6 +181,10 @@ void extract_file(FILE *archive, const char *output_dir, const char *password) {
   times.modtime = time(NULL);
   utime(output_path, &times);
   chmod(output_path, metadata.permissions);
+
+  free(buffer);
+  free(output_path);
+  free(metadata.filename);
 }
 
 // Create an archive
