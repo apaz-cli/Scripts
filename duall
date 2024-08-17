@@ -1,2 +1,2 @@
-#!/bin/bash
+#!/bin/sh
 sudo du / 2>/dev/null | sort -n | tail -n 500
