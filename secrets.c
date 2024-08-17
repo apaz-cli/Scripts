@@ -180,6 +180,9 @@ static inline void add_file(FILE *archive, const char *filename,
   encrypt(buffer, bytes_read, password);
   fwrite(buffer, 1, bytes_read, archive);
 
+  // Debug print
+  printf("Added file: %s\n", filename);
+
   free(buffer);
   free(metadata.filename);
   fclose(input);
