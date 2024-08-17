@@ -254,6 +254,9 @@ static inline void extract_file(FILE *archive, const char *output_dir,
 
   fclose(output);
 
+  // Debug print
+  printf("Extracted file: %s\n", output_path);
+
   // Restore metadata
   struct utimbuf times;
   times.actime = metadata.last_access;
