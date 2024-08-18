@@ -1,0 +1,56 @@
+#!/usr/bin/env python
+
+# Run the following command, and capture the output:
+# cc -E - -v < /dev/null
+
+from posixpath import realpath
+import subprocess
+import sys
+import re
+import os
+
+def query_compiler() -> list[str]:
+    # Run the command, and return the output
+    process = subprocess.Popen(['clang', '-E', '-', '-v'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    _, stderr = process.communicate(input=b'\n')
+    return stderr.decode('utf-8').split('\n')
+
+def fix_paths(paths: list) -> list:
+    ret = []
+    for p in paths:
+        p = os.path.normpath(p)
+        if not p in ret:
+            ret.append(p)
+    return ret
+
+def capture_includes() -> dict:
+    # Find the line that begins the includes
+    ret: dict[str, list[str]] = {}
+
+    includes = None
+    output: list[str] = query_compiler()
+    for line in output:
+        if line.startswith('#include <...> search starts here:'):
+            includes = []
+            continue
+        if line.startswith('End of search list.'):
+            assert includes is not None
+            ret["includes"] = includes
+            includes = None
+            continue
+        if includes is not None:
+            includes.append(line.strip())
+
+        if line.startswith("COMPILER_PATH="):
+            ret["compiler_path"] = fix_paths(line.split('=')[1].split(':'))
+
+        if line.startswith("LIBRARY_PATH="):
+            ret["library_path"] = fix_paths(line.split('=')[1].split(':'))
+
+    if "includes" in ret:
+        ret["includes"] = fix_paths(ret["includes"])
+    return ret
+
+import json
+print(json.dumps(capture_includes(), indent=4))
+
