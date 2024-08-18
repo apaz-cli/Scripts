@@ -3,6 +3,7 @@
 TMP="$(mktemp -d)"; cc -o "$TMP/a.out" -x c "$0" && "$TMP/a.out" $@; RVAL=$?; rm -rf "$TMP"; exit $RVAL
 #endif
 
+#define _POSIX_C_SOURCE 200809L
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -13,6 +14,7 @@ TMP="$(mktemp -d)"; cc -o "$TMP/a.out" -x c "$0" && "$TMP/a.out" $@; RVAL=$?; rm
 #include <time.h>
 #include <unistd.h>
 #include <utime.h>
+#include <errno.h>
 
 #define SMALL_FILE_THRESHOLD 1024 // 1 KB
 #define DUMMY_BITS 20
@@ -223,24 +225,29 @@ static inline void extract_file(FILE *archive, const char *output_dir,
   sprintf(output_path, "%s/%s", output_dir, metadata.filename);
 
   // Create directories if they don't exist
-  char *dir_path = strdup(output_path);
-  char *p = strrchr(dir_path, '/');
-  if (p) {
-    *p = '\0';
-    for (char *q = dir_path + 1; *q; q++) {
-      if (*q == '/') {
-        *q = '\0';
-        mkdir(dir_path, 0755);
-        *q = '/';
-      }
+  char *last_slash = strrchr(output_path, '/');
+  if (last_slash) {
+    *last_slash = '\0';
+    if (mkdirat(AT_FDCWD, output_path, 0755) == -1 && errno != EEXIST) {
+      perror("Error creating directory");
+      free(output_path);
+      free(metadata.filename);
+      return;
     }
-    mkdir(dir_path, 0755);
+    *last_slash = '/';
   }
-  free(dir_path);
 
-  FILE *output = fopen(output_path, "wb");
-  if (!output) {
+  int output_fd = openat(AT_FDCWD, output_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (output_fd == -1) {
     perror("Error opening output file");
+    free(output_path);
+    free(metadata.filename);
+    return;
+  }
+  FILE *output = fdopen(output_fd, "wb");
+  if (!output) {
+    perror("Error converting file descriptor to FILE*");
+    close(output_fd);
     free(output_path);
     free(metadata.filename);
     return;
