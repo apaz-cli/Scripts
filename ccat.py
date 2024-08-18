@@ -20,7 +20,7 @@ def get_shebang_lexer(file_path):
                     return get_lexer_by_name('bash')
             if line.strip() == '#if 0' and i + 1 < len(lines):
                 next_line = lines[i + 1].strip()
-                if next_line.startswith('TMP="$(mktemp -d)"; cc -o "$TMP/a.out" -x c "$0"'):
+                if all(component in next_line for component in ['mktemp -d', 'cc', '-x c', '"$0"']):
                     return get_lexer_by_name('c')
     return None
 
