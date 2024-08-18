@@ -92,7 +92,6 @@ static inline void write_metadata(FILE *archive, const FileMetadata *metadata,
   free(buffer);
 }
 
-// Read metadata from file
 static inline void read_metadata(FILE *archive, FileMetadata *metadata,
                                  const char *password) {
   size_t total_size;
@@ -131,7 +130,6 @@ static inline void read_metadata(FILE *archive, FileMetadata *metadata,
   free(buffer);
 }
 
-// Add a file to the archive
 static inline void add_file(FILE *archive, const char *filename,
                             const char *password) {
   FILE *input = fopen(filename, "rb");
@@ -188,28 +186,26 @@ static inline void add_file(FILE *archive, const char *filename,
   fclose(input);
 }
 
-// Extract a file from the archive
-// Write dummy value for password verification
 static inline void write_dummy(FILE *archive, const char *password) {
   char dummy[DUMMY_BITS] = {0}; // Initialize with zeros
   encrypt(dummy, DUMMY_BITS, password);
   fwrite(dummy, 1, DUMMY_BITS, archive);
 }
 
-// Read and verify dummy value
 static inline int read_dummy(FILE *archive, const char *password) {
   char dummy[DUMMY_BITS];
   if (fread(dummy, 1, DUMMY_BITS, archive) != DUMMY_BITS) {
     perror("Error reading dummy value");
     return 0;
   }
+
   decrypt(dummy, DUMMY_BITS, password);
   for (int i = 0; i < DUMMY_BITS; i++) {
     if (dummy[i] != 0) {
-      return 0; // Decryption failed
+      return 0;
     }
   }
-  return 1; // Decryption succeeded
+  return 1;
 }
 
 static inline void extract_file(FILE *archive, const char *output_dir,
@@ -291,8 +287,7 @@ static inline void extract_file(FILE *archive, const char *output_dir,
 
 // Create an archive
 static inline void create_archive(const char *archive_name,
-                                  const char *password,
-                                  int num_inputs,
+                                  const char *password, int num_inputs,
                                   char **input_files) {
   FILE *archive = fopen(archive_name, "wb");
   if (!archive) {
@@ -342,20 +337,26 @@ static inline void extract_archive(const char *archive_name,
 }
 
 static inline void print_usage(void) {
-  fprintf(stderr, "Usage: secrets <create|extract> <archive_name> <password> [input_files_and_folders]...\n");
-  fprintf(stderr, "       secrets extract <archive_name> <password> [output_directory]\n");
+  fprintf(stderr, "Usage: secrets <create|extract> <archive_name> <password> "
+                  "[input_files_and_folders]...\n");
+  fprintf(
+      stderr,
+      "       secrets extract <archive_name> <password> [output_directory]\n");
 }
 
 static inline void print_help(void) {
-  fprintf(stderr, "Usage: secrets [OPTIONS] <create|extract> <archive_name> <password> [input_files_and_folders]...\n");
-  fprintf(stderr, "       secrets [OPTIONS] extract <archive_name> <password> [output_directory]\n");
+  fprintf(stderr, "Usage: secrets [OPTIONS] <create|extract> <archive_name> "
+                  "<password> [input_files_and_folders]...\n");
+  fprintf(stderr, "       secrets [OPTIONS] extract <archive_name> <password> "
+                  "[output_directory]\n");
   fprintf(stderr, "\nOptions:\n");
   fprintf(stderr, "  --help     Display this help message and exit\n");
   fprintf(stderr, "\nModes:\n");
   fprintf(stderr, "  create     Create a new archive\n");
   fprintf(stderr, "  extract    Extract files from an existing archive\n");
   fprintf(stderr, "\nArguments:\n");
-  fprintf(stderr, "  output_directory    Optional. Directory to extract files to (default: current directory)\n");
+  fprintf(stderr, "  output_directory    Optional. Directory to extract files "
+                  "to (default: current directory)\n");
 }
 
 int main(int argc, char **argv) {
@@ -378,7 +379,8 @@ int main(int argc, char **argv) {
     create_archive(archive_name, password, argc - 4, &argv[4]);
   } else if (strcmp(mode, "extract") == 0) {
     if (argc < 4 || argc > 5) {
-      fprintf(stderr, "Error: Incorrect number of arguments for extract mode.\n");
+      fprintf(stderr,
+              "Error: Incorrect number of arguments for extract mode.\n");
       return print_usage(), 1;
     }
     const char *output_dir = (argc == 5) ? argv[4] : ".";
