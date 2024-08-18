@@ -10,13 +10,18 @@ from pygments.util import ClassNotFound
 
 def get_shebang_lexer(file_path):
     with open(file_path, 'r') as file:
-        first_line = file.readline().strip()
-        if first_line.startswith('#!'):
-            if 'python' in first_line:
-                return get_lexer_by_name('python')
-            elif 'bash' in first_line or 'sh' in first_line:
-                return get_lexer_by_name('bash')
-            # Add more shebang checks as needed
+        content = file.read()
+        lines = content.split('\n')
+        for i, line in enumerate(lines):
+            if i == 0 and line.startswith('#!'):
+                if 'python' in line:
+                    return get_lexer_by_name('python')
+                elif 'bash' in line or 'sh' in line:
+                    return get_lexer_by_name('bash')
+            if line.strip() == '#if 0' and i + 1 < len(lines):
+                next_line = lines[i + 1].strip()
+                if next_line.startswith('TMP="$(mktemp -d)"; cc -o "$TMP/a.out" -x c "$0"'):
+                    return get_lexer_by_name('c')
     return None
 
 def cat_highlighted(file_path):
