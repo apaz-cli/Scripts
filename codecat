@@ -6,9 +6,13 @@ import os
 import subprocess
 from pygments import highlight
 from pygments.lexers import get_lexer_for_filename, guess_lexer, get_lexer_by_name
-from pygments.formatters import TerminalFormatter
+from pygments.formatters import TerminalFormatter, Terminal256Formatter
 from pygments.util import ClassNotFound
 
+
+def supports_256_colors():
+    term = os.environ.get('TERM', '')
+    return '256color' in term or term in ['xterm-kitty']
 
 def choose_lexer(file_path, content):
     try:
@@ -47,7 +51,8 @@ def cat_highlighted(file_path):
             content = file.read()
 
         lexer = choose_lexer(file_path, content)
-        highlighted = highlight(content, lexer, TerminalFormatter())
+        formatter = Terminal256Formatter() if supports_256_colors() else TerminalFormatter()
+        highlighted = highlight(content, lexer, formatter)
         print(highlighted)
 
     except BaseException:
