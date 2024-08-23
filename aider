@@ -1,0 +1,18 @@
+#!/bin/sh
+
+CURRENT_WD="$(pwd)"
+AIDER_DIR="$REPOS_DIR/aider"
+AIDER_BIN="$AIDER_DIR/bin/aider"
+
+if [ ! -d "$AIDER_DIR" ]; then
+    echo "Installing aider."
+    cd "$REPOS_DIR"
+    git clone https://github.com/paul-gauthier/aider
+    cd aider/
+    python -m venv .
+    . bin/activate
+    bin/pip install -e .
+fi
+
+cd "$CURRENT_WD"
+$AIDER_BIN "$@"

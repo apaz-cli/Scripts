@@ -30,7 +30,7 @@ if [ ! "$#" -eq 1 ]; then
   exit 1
 fi
 
-cd ~/git/Scripts/
+cd "$SCRIPTS_DIR"
 if [ ! -f "$1" ]; then
   printf "%s\n" "$SHEBANG" | awk '{gsub(/\\n/, "\n"); print}' > "$1"
 fi

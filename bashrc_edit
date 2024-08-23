@@ -1,8 +1,0 @@
-# Source all files in the ~/.secrets/env_vars/ directory
-if [ -d "$HOME/.secrets/env_vars" ]; then
-    for file in "$HOME"/.secrets/env_vars/*; do
-        if [ -f "$file" ]; then
-            . "$file"
-        fi
-    done
-fi
