@@ -6,21 +6,17 @@ import os
 import subprocess
 from pygments import highlight
 from pygments.lexers import get_lexer_for_filename, guess_lexer, get_lexer_by_name
-from pygments.formatters import TerminalFormatter, Terminal256Formatter
-from pygments.styles import get_style_by_name
+from pygments.formatters import TerminalFormatter
 from pygments.style import Style
-from pygments.styles.monokai import MonokaiStyle
+from pygments.styles.vim import VimStyle
+from pygments.util import ClassNotFound
+
+copy_style = VimStyle
 
 class CustomStyle(Style):
-    """
-    Custom style based on Monokai.
-    You can modify the attributes here to customize your style.
-    """
-    styles = dict(MonokaiStyle.styles)
-
-    # Example of how to modify a style (uncomment and adjust as needed):
-    # String.styles['String'] = '#ff5555'
-from pygments.util import ClassNotFound
+    background_color = copy_style.background_color
+    highlight_color = copy_style.highlight_color
+    styles = copy_style.styles
 
 
 def choose_lexer(file_path, content):
@@ -62,7 +58,7 @@ def cat_highlighted(file_path):
         lexer = choose_lexer(file_path, content)
         term = os.environ.get('TERM', '')
         style = CustomStyle
-        formatter = Terminal256Formatter(style=style) if '256color' in term or term in ['xterm-kitty'] else TerminalFormatter(style=style)
+        formatter = TerminalFormatter()
         highlighted = highlight(content, lexer, formatter)
         print(highlighted)
 
