@@ -7,6 +7,7 @@ import subprocess
 from pygments import highlight
 from pygments.lexers import get_lexer_for_filename, guess_lexer, get_lexer_by_name
 from pygments.formatters import TerminalFormatter, Terminal256Formatter
+from pygments.styles import get_style_by_name
 from pygments.util import ClassNotFound
 
 
@@ -48,7 +49,8 @@ def cat_highlighted(file_path):
 
         lexer = choose_lexer(file_path, content)
         term = os.environ.get('TERM', '')
-        formatter = Terminal256Formatter() if '256color' in term or term in ['xterm-kitty'] else TerminalFormatter()
+        style = get_style_by_name("monokai")
+        formatter = Terminal256Formatter(style=style) if '256color' in term or term in ['xterm-kitty'] else TerminalFormatter(style=style)
         highlighted = highlight(content, lexer, formatter)
         print(highlighted)
 
