@@ -1,5 +1,8 @@
 #!/bin/sh
-cd '/home/apaz/Videos/'
+
+# Download a youtube video (or other media) to Videos/
+
+cd '$HOME/Videos/'
 yt-dlp --no-mtime $@
 if [ ! $? = "0" ]; then exit 1; fi
 kill -9 $PPID

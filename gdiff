@@ -1,5 +1,7 @@
 #!/bin/sh
 
+# Print the git diff between HEAD~$1 and the commit that preceeds it.
+
 if [ "$#" -eq 1 ]; then
     a="$1"
     if echo "$a" | grep -qE '^-?[0-9]+$'; then

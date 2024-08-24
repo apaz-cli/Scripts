@@ -1,3 +1,6 @@
 #!/bin/sh
 
+# Ask the internet what my ip address is.
+# TODO: Figure out the more sane way. But oh well.
+
 curl ipinfo.io/ip && echo

@@ -1,5 +1,7 @@
 #!/bin/sh
 
+# Launch mus in xterm.
+
 xterm                                    \
   -fa 'lemon'                            \
   -fd 'Unifont'                          \

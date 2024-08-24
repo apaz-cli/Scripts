@@ -1,5 +1,7 @@
 #!/bin/sh
 
+# Run hyfetch, installing if not available. It's like neofetch, but gayer.
+
 INSTALL_DIR="/tmp/hyfetch"
 
 WD="$(pwd)"

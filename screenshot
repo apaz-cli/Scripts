@@ -1,4 +1,9 @@
 #!/usr/bin/bash
+
+# Take a screenshot, store it in ~/Screenshots, and open in gimp.
+
+# TODO: Fix. Should be made actually useful.
+
 cd ~/Screenshots/
 makeglob="import glob;g=glob.glob('/home/apaz/Screenshots/*.png')"
 #stripglob="g=''.join([c for c in str(g) if not c in ['\n',' ']])"

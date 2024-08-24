@@ -1,5 +1,7 @@
 #!/bin/sh
 
+# Copies the (preprocessed) file to your clipboard, and opens godbolt in browser.
+
 PP=0
 if [ "$1" = "pp" ]; then
   PP=1;shift

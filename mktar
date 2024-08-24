@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+# Create a tar file.
+
 if [ "$#" -eq 0 ]; then
   echo "USAGE: mktar <output> <input>..."
   exit 1

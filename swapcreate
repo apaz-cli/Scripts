@@ -1,5 +1,7 @@
 #!/bin/sh
 
+# Create a swapfile.
+
 if [ "$1" = "" ]; then
   echo "Usage: swapcreate <num> <loc>?"
   echo "  where <num> is the number of GiB to allocate"

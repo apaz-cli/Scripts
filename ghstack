@@ -1,5 +1,7 @@
 #!/bin/sh
 
+# Wrapper script around ghstack. Pip installs it in /tmp if unavailable.
+
 if [ ! -d "/tmp/ghstack" ]; then
   mkdir /tmp/ghstack 2>/dev/null
   python -m venv /tmp/ghstack

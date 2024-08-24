@@ -1,2 +1,5 @@
 #!/bin/sh
+
+# Print out the size of all files on disk, sorted in order from smallest to largest.
+
 sudo du / 2>/dev/null | sort -n

@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # Activates conda and switches to the specified workspace.
+# TODO: Switch to use venv ~
 
 # USAGE:
 # In the folder with all your working repos:

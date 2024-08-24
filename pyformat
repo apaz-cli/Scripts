@@ -1,2 +1,6 @@
 #!/bin/sh
+
+# Use black to format all the python files in the current git repo that have changed.
+# TODO: Error checking.
+
 python -m black $(git status --porcelain | awk 'match($1, "M") && match($2, "\\.py$") {print $2}')

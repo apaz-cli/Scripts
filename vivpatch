@@ -1,4 +1,7 @@
 #!/bin/sh
+
+# Patch vivaldi with my custom CSS.
+
 cd /opt/vivaldi/resources/vivaldi/style
 
 # Check if the css is already imported.

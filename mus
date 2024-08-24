@@ -1,5 +1,7 @@
 #!/bin/sh
 
+# Run a terminal music player to play file from ~/Music
+
 FOLDER=$1
 if [ -z "$FOLDER" ]; then
     FOLDER="$(echo ~)/Music"

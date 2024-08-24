@@ -25,9 +25,9 @@ def replace(file_path, pattern, subst, verbose=False):
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
             content = file.read()
-        
+
         new_content = content.replace(pattern, subst)
-        
+
         if new_content != content:
             with open(file_path, 'w', encoding='utf-8') as file:
                 file.write(new_content)

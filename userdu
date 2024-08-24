@@ -1,2 +1,5 @@
 #!/bin/sh
+
+# Print the total disk space used by the current user.
+
 du -sh /home/* 2>&1 | grep -v  '^du:'

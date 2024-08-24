@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+
+# Extract a tar.gz file.
+
 if [ -z "$1" ]
   then
     echo "Please specify a tar.gz archive to decompress."

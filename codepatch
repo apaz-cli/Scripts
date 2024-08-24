@@ -1,3 +1,8 @@
 #!/bin/sh
-sudo chown -R $(whoami) /usr/share/code
+
+# Take ownership of the vscode install folder.
+# This is necessary to get custom background images working.
+# It breaks when vscode is updated, so we re-run this after every update.
+
+sudo chown -R "$(whoami)" /usr/share/code
 echo "Changed ownership of /usr/share/code."

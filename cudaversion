@@ -1,2 +1,12 @@
 #!/bin/sh
-echo "$(nvidia-smi -q -u | grep CUDA | head -n 1 | cut -d ':' -f 2 | xargs)"
+
+# Print out the installed version of CUDA.
+
+if [ ! -x "$(which nvidia-smi)" ]; then
+  echo "nvidia-smi is not installed."
+  exit 1
+else
+  echo "$(nvidia-smi -q -u | grep CUDA | head -n 1 | cut -d ':' -f 2 | xargs)"
+  exit 0
+fi
+

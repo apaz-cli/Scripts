@@ -1,2 +1,3 @@
-#!/usr/bin/env bash
-vivaldi https://mail.google.com/mail/u/0/?tab=mm1#inbox
+#!/bin/sh
+
+xdg-open "https://mail.google.com/mail/u/0/?tab=mm1#inbox"

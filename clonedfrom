@@ -1,2 +1,5 @@
 #!/bin/sh
+
+# Print the url from which the repo was cloned.
+
 git remote get-url origin

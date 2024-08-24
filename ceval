@@ -1,2 +1,6 @@
 #!/bin/sh
-nano -0v ~/git/cpython/Python/ceval.c
+
+# A convenience script for reading the implementation of cpython bytecode instructions.
+
+rnano "$REPOS_DIR/cpython/Python/ceval.c"
+

@@ -1,2 +1,5 @@
 #!/bin/sh
+
+# Shorthand for git grep.
+
 git grep -r $@

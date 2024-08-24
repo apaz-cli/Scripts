@@ -1,5 +1,7 @@
 #!/bin/sh
 
+# Kill firefox and vscode.
+
 FIRE=$(pgrep firefox)
 if [ ! "$FIRE" = "" ]; then
   for pid in $FIRE; do kill -s SIGTERM "$pid"; echo "Killed Firefox: $pid"; done  

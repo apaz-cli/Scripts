@@ -1,6 +1,9 @@
 #!/bin/sh
 
-I=0
+# Print out the arguments passed to this command in order, each on a new line.
+# This helps debug command argument parsing.
+
+I=1
 for arg in $@; do
   echo "arg $I:" "$arg"
   I="$(expr $I + 1)"

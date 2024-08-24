@@ -1,2 +1,6 @@
 #!/bin/sh
-locate "$1" | grep "$1"
+
+# Call locate, and color the results red with grep.
+# TODO: come up with a better name.
+
+locate "$1" | grep "$1" --color=always

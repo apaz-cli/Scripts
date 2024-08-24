@@ -1,4 +1,7 @@
 #!/bin/sh
+
+# TODO: Check against "record" script.
+
 ffmpeg -f x11grab -y \
   -framerate 10 \
   -s 3840x2160 \

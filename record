@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# TODO: Review
+
 # ffmpeg script to record part of the desktop
 # with ultimate codec flags.
 #

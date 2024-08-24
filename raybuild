@@ -1,4 +1,7 @@
 #!/bin/sh
+
+# Build raylib, and copy the build tree into the working dir.
+
 WD="$(pwd)"
 cd /tmp/
 rm -rf raylib/ 2>/dev/null

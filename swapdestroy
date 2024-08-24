@@ -1,5 +1,6 @@
 #!/bin/sh
 
+# Destroy a swapfile created with swapcreate.
 # Usage: No arguments.
 
 SWAPFILE="$(sudo swapon --show | grep '/.swapfile.img' | awk '{print $1}')"

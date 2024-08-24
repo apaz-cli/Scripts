@@ -1,6 +1,14 @@
 #!/bin/sh
 
-killall xfce4-appfinder
+# Toggle the application menu.
+# If the xfce4-panel is open, use the whisker menu. Otherwise, use xfce4-appfinder.
+
+# TODO: What when there's a panel, but no whisker menu?
+
+
+if killall xfce4-appfinder 2>/dev/null; then
+  exit 0
+fi
 
 pgrep xfce4-panel >/dev/null
 if [ $? -eq 0 ]; then

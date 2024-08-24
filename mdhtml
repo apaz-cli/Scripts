@@ -1,5 +1,7 @@
 #!/usr/bin/python3
 
+# Convert markdown to HTML.
+
 import os
 import sys
 import shutil

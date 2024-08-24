@@ -1,2 +1,5 @@
 #!/bin/sh
+
+# Wrap nano, because I mistype it a lot.
+
 nano "$@"
