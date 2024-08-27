@@ -1,0 +1,7 @@
+#!/bin/sh
+
+TMPF="/tmp/__import_torch__.py"
+
+echo "import torch" > $TMPF
+cd ~/git/tts/
+bin/python -i "$TMPF"
