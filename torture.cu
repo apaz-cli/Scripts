@@ -24,14 +24,40 @@
         } \
     } while(0)
 
-__global__ void gpu_torture_kernel(float *data, size_t n) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < n) {
+__global__ void gpu_torture_kernel(float **data_blocks, size_t n_blocks, size_t block_size) {
+    size_t thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t total_elements = n_blocks * block_size;
+    
+    if (thread_id < total_elements) {
+        size_t block_idx = thread_id / block_size;
+        size_t element_idx = thread_id % block_size;
+        
         float x = 1.0f;
+        float y = 2.0f;
+        float z = 3.0f;
+        
         for (int i = 0; i < 1000000; i++) {
-            x = sinf(x) * cosf(x) * sqrtf(x);
+            x = sinf(x) * cosf(y) * tanf(z);
+            y = expf(x) * logf(fabsf(y)) * sqrtf(fabsf(z));
+            z = powf(x, y) * fmodf(z, 3.14159f);
+            
+            // Access and modify data from different blocks
+            for (size_t j = 0; j < n_blocks; j++) {
+                size_t idx = (block_idx + j) % n_blocks;
+                float* block = data_blocks[idx];
+                float val = block[(element_idx + j) % block_size];
+                x += val;
+                y *= val;
+                z -= val;
+            }
         }
-        data[idx] = x;
+        
+        // Write results back to all blocks
+        for (size_t j = 0; j < n_blocks; j++) {
+            size_t idx = (block_idx + j) % n_blocks;
+            float* block = data_blocks[idx];
+            block[(element_idx + j) % block_size] = x + y + z;
+        }
     }
 }
 
@@ -56,15 +82,21 @@ cudaError_t launch_gpu_torture() {
     
     printf("Total GPU memory allocated: %.2f GB\n", total_allocated / (1024.0 * 1024.0 * 1024.0));
     
-    size_t n = total_allocated / sizeof(float);
+    size_t n_blocks = gpu_memory_blocks.size();
+    size_t block_size = HALF_GB / sizeof(float);
+    size_t total_elements = n_blocks * block_size;
+    
+    // Allocate and copy device pointers to GPU
+    float **d_data_blocks;
+    CUDA_CHECK(cudaMalloc(&d_data_blocks, n_blocks * sizeof(float*)));
+    CUDA_CHECK(cudaMemcpy(d_data_blocks, gpu_memory_blocks.data(), n_blocks * sizeof(float*), cudaMemcpyHostToDevice));
+    
     dim3 block(BLOCK_SIZE);
-    dim3 grid((n + BLOCK_SIZE - 1) / BLOCK_SIZE);
+    dim3 grid((total_elements + BLOCK_SIZE - 1) / BLOCK_SIZE);
     
     while (1) {
-        for (float* d_data : gpu_memory_blocks) {
-            gpu_torture_kernel<<<grid, block>>>(d_data, n);
-            CUDA_CHECK(cudaGetLastError());
-        }
+        gpu_torture_kernel<<<grid, block>>>(d_data_blocks, n_blocks, block_size);
+        CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
         puts("GPU torture kernel finished");
     }
