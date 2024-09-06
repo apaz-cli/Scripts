@@ -7,7 +7,7 @@ then
     nvcc -O3 -o torture torture.cu -lpthread
 else
     echo "NVCC not found, compiling without CUDA support"
-    cc -O3 -o torture torture.cu -lpthread -lm
+    cc -x c -O3 -o torture torture.cu -lpthread -lm
 fi
 
 echo "Build complete. Run ./torture to execute the program."
