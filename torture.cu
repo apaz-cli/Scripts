@@ -134,37 +134,60 @@ void *infinite_loop(void *unused) {
     ;
 }
 
-char *store_mem = NULL;
+char *alloc_mem(size_t n_bytes) {
+    if (n_bytes == 0)
+        return NULL;
 
-void alloc_mem(size_t n_bytes) {
-  if (n_bytes == 0)
-    return;
+    char *mem = (char *)calloc(1, n_bytes);
+    if (!mem) {
+        puts("malloc() failed."), exit(1);
+    }
 
-  size_t n_b = n_bytes;
-  store_mem = (char *)calloc(1, n_b);
-  if (!store_mem)
-    puts("malloc() failed."), exit(1);
+    for (size_t i = 0; i < n_bytes; i++)
+        mem[i] = 0;
 
-  for (size_t i = 0; i < n_b; i++)
-    store_mem[i] = 0;
-
-  printf("Allocated %.2f GB of memory\n", n_bytes / ONE_GB);
+    printf("Allocated %.2f GB of memory\n", n_bytes / (double)ONE_GB);
+    return mem;
 }
 
-void torture_cpu(void) {
-    // Create one minus the number of CPUs threads. The last one is this thread.
-    int numThreads = sysconf(_SC_NPROCESSORS_ONLN) - 1; 
+typedef struct {
+    char *mem;
+    size_t size;
+} ThreadArg;
+
+void *cpu_task(void *arg) {
+    ThreadArg *thread_arg = (ThreadArg *)arg;
+    char *mem = thread_arg->mem;
+    size_t size = thread_arg->size;
+    
+    while (1) {
+        for (size_t i = 0; i < size; i++) {
+            mem[i] = (char)(i % 256);
+            __asm__ volatile("" : : : "memory");
+        }
+    }
+    return NULL;
+}
+
+void torture_cpu(char *mem, size_t mem_size) {
+    int numThreads = sysconf(_SC_NPROCESSORS_ONLN);
     pthread_t threads[numThreads];
-    int rc;
-    for (size_t t = 0; t < numThreads; t++) {
-        rc = pthread_create(&threads[t], NULL, infinite_loop, NULL);
+    ThreadArg thread_args[numThreads];
+    size_t chunk_size = mem_size / numThreads;
+
+    for (int t = 0; t < numThreads; t++) {
+        thread_args[t].mem = mem + t * chunk_size;
+        thread_args[t].size = (t == numThreads - 1) ? (mem_size - t * chunk_size) : chunk_size;
+        int rc = pthread_create(&threads[t], NULL, cpu_task, &thread_args[t]);
         if (rc) {
             printf("ERROR; return code from pthread_create() is %d\n", rc);
             exit(1);
         }
     }
 
-    infinite_loop(NULL);
+    for (int t = 0; t < numThreads; t++) {
+        pthread_join(threads[t], NULL);
+    }
 }
 
 
@@ -211,7 +234,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    alloc_mem(mem_bytes);
+    char *allocated_mem = alloc_mem(mem_bytes);
 
     pthread_t gpu_thread;
     if (run_gpu) {
@@ -240,8 +263,16 @@ int main(int argc, char **argv) {
     }
 
     if (run_cpu) {
-        torture_cpu();
+        torture_cpu(allocated_mem, mem_bytes);
     }
+
+    // Wait for GPU thread to finish if it was started
+    if (run_gpu) {
+        pthread_join(gpu_thread, NULL);
+    }
+
+    // Free allocated memory
+    free(allocated_mem);
 
     return 0;
 }
