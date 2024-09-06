@@ -189,18 +189,19 @@ static inline uint64_t xorshift64(uint64_t *a) {
 }
 
 static inline char *alloc_mem(size_t n_bytes) {
-  if (n_bytes == 0)
-    return puts("CPU memory allocated: 0.00 GB"), (char *)NULL;
+  if (n_bytes == 0) {
+    n_bytes = ONE_GB; // Default to 1GB if no memory size is specified
+    printf("No memory size specified. Using default: 1.00 GB\n");
+  }
 
   char *mem = (char *)calloc(1, n_bytes);
-  if (!mem)
-    puts("malloc() failed."), exit(1);
+  if (!mem) {
+    puts("malloc() failed.");
+    exit(1);
+  }
 
-  for (size_t i = 0; i < n_bytes; i++)
-    mem[i] = 0;
-
-  return printf("CPU memory allocated: %.2f GB\n", (double)n_bytes / ONE_GB),
-         mem;
+  printf("CPU memory allocated: %.2f GB\n", (double)n_bytes / ONE_GB);
+  return mem;
 }
 
 typedef struct {
@@ -298,6 +299,11 @@ int main(int argc, char **argv) {
     fprintf(stderr,
             "Error: At least one of --cpu or --gpu must be specified.\n");
     return 1;
+  }
+
+  // If --cpu is specified but no memory size is given, use the default (1GB)
+  if (run_cpu && mem_bytes == 0) {
+    mem_bytes = ONE_GB;
   }
 
   pthread_t gpu_thread;
