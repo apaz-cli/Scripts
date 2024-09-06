@@ -7,6 +7,7 @@
 #include <cuda_runtime.h>
 #include <vector>
 #include <string.h>
+#include <random>
 /*******/
 /* GPU */
 /*******/
@@ -149,17 +150,25 @@ char *alloc_mem(size_t n_bytes) {
 typedef struct {
     char *mem;
     size_t size;
+    unsigned int seed;
 } ThreadArg;
 
 void *cpu_task(void *arg) {
     ThreadArg *thread_arg = (ThreadArg *)arg;
     char *mem = thread_arg->mem;
     size_t size = thread_arg->size;
+    std::mt19937 gen(thread_arg->seed);
+    std::uniform_int_distribution<> dis(0, 255);
+    std::uniform_int_distribution<size_t> pos_dis(0, size - 1);
     
     while (1) {
         for (size_t i = 0; i < size; i++) {
-            mem[i] = (char)(i % 256);
-            __asm__ volatile("" : : : "memory");
+            size_t pos = pos_dis(gen);
+            char value = static_cast<char>(dis(gen));
+            mem[pos] = value;
+            // Force memory access
+            volatile char dummy = mem[pos];
+            (void)dummy;
         }
     }
     return NULL;
@@ -171,9 +180,11 @@ void torture_cpu(char *mem, size_t mem_size) {
     ThreadArg thread_args[numThreads];
     size_t chunk_size = mem_size / numThreads;
 
+    std::random_device rd;
     for (int t = 0; t < numThreads; t++) {
         thread_args[t].mem = mem + t * chunk_size;
         thread_args[t].size = (t == numThreads - 1) ? (mem_size - t * chunk_size) : chunk_size;
+        thread_args[t].seed = rd(); // Use random_device to seed each thread differently
         int rc = pthread_create(&threads[t], NULL, cpu_task, &thread_args[t]);
         if (rc) {
             printf("ERROR; return code from pthread_create() is %d\n", rc);
