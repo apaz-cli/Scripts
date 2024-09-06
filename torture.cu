@@ -7,7 +7,7 @@
 #include <cuda_runtime.h>
 #include <vector>
 #include <string.h>
-#include <random>
+#include <stdint.h>
 /*******/
 /* GPU */
 /*******/
@@ -130,6 +130,19 @@ void* launch_gpu_torture(void* arg) {
 /* CPU */
 /*******/
 
+// Xorshift PRNG implementation
+struct xorshift32_state {
+    uint32_t a;
+};
+
+uint32_t xorshift32(struct xorshift32_state *state) {
+    uint32_t x = state->a;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    return state->a = x;
+}
+
 
 char *alloc_mem(size_t n_bytes) {
     if (n_bytes == 0)
@@ -150,21 +163,19 @@ char *alloc_mem(size_t n_bytes) {
 typedef struct {
     char *mem;
     size_t size;
-    unsigned int seed;
+    uint32_t seed;
 } ThreadArg;
 
 void *cpu_task(void *arg) {
     ThreadArg *thread_arg = (ThreadArg *)arg;
     char *mem = thread_arg->mem;
     size_t size = thread_arg->size;
-    std::mt19937 gen(thread_arg->seed);
-    std::uniform_int_distribution<> dis(0, 255);
-    std::uniform_int_distribution<size_t> pos_dis(0, size - 1);
+    struct xorshift32_state state = {thread_arg->seed};
     
     while (1) {
         for (size_t i = 0; i < size; i++) {
-            size_t pos = pos_dis(gen);
-            char value = static_cast<char>(dis(gen));
+            size_t pos = xorshift32(&state) % size;
+            char value = (char)(xorshift32(&state) & 0xFF);
             mem[pos] = value;
             // Force memory access
             volatile char dummy = mem[pos];
@@ -180,11 +191,12 @@ void torture_cpu(char *mem, size_t mem_size) {
     ThreadArg thread_args[numThreads];
     size_t chunk_size = mem_size / numThreads;
 
-    std::random_device rd;
+    // Use current time as a seed for the first thread
+    uint32_t seed = (uint32_t)time(NULL);
     for (int t = 0; t < numThreads; t++) {
         thread_args[t].mem = mem + t * chunk_size;
         thread_args[t].size = (t == numThreads - 1) ? (mem_size - t * chunk_size) : chunk_size;
-        thread_args[t].seed = rd(); // Use random_device to seed each thread differently
+        thread_args[t].seed = seed + t; // Use a different seed for each thread
         int rc = pthread_create(&threads[t], NULL, cpu_task, &thread_args[t]);
         if (rc) {
             printf("ERROR; return code from pthread_create() is %d\n", rc);
