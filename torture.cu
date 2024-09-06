@@ -43,7 +43,7 @@ cudaError_t launch_gpu_torture() {
         float* d_data;
         cudaError_t err = cudaMalloc(&d_data, HALF_GB);
         if (err != cudaSuccess) {
-            if (err == cudaError::cudaErrorOutOfMemory) {
+            if (err == cudaError_t::cudaErrorOutOfMemory) {
                 break;  // We've used all available memory
             }
             return err;
