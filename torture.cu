@@ -6,38 +6,23 @@
 #include <unistd.h>
 #include <cuda_runtime.h>
 
-#define CUDA_CHECK(call) \
-    do { \
-        cudaError_t error = call; \
-        if (error != cudaSuccess) { \
-            fprintf(stderr, "CUDA error at %s:%d - %s\n", __FILE__, __LINE__, \
-                    cudaGetErrorString(error)); \
-            exit(1); \
-        } \
-    } while(0)
+/*******/
+/* GPU */
+/*******/
 
 #define BLOCK_SIZE 256
 #define NUM_BLOCKS 1024
 
-void *infinite_loop(void *unused) {
-  while (1)
-    ;
-}
+#define CUDA_CHECK(call) \
+    do { \
+        cudaError_t _cu_error = call; \
+        if (_cu_error != cudaSuccess) { \
+            fprintf(stderr, "CUDA error at %s:%d - %s\n", __FILE__, __LINE__, \
+                    cudaGetErrorString(_cu_error)); \
+            exit(1); \
+        } \
+    } while(0)
 
-char *store_mem = NULL;
-
-void alloc_mem(int n_gb) {
-  if (n_gb <= 0)
-    return;
-
-  size_t n_b = (size_t)n_gb * 1000 * 1000 * 1000;
-  store_mem = (char *)calloc(1, n_b);
-  if (!store_mem)
-    puts("malloc() failed."), exit(1);
-
-  for (size_t i = 0; i < n_b; i++)
-    store_mem[i] = 0;
-}
 
 __global__ void gpu_torture_kernel(float *data, int n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -61,13 +46,36 @@ void launch_gpu_torture() {
     while (1) {
         gpu_torture_kernel<<<grid, block>>>(d_data, n);
         CUDA_CHECK(cudaDeviceSynchronize());
+        puts("GPU torture kernel finished");
     }
-
-    // This will never be reached, but good practice
-    CUDA_CHECK(cudaFree(d_data));
 }
 
-void load_threads(void) {
+/*******/
+/* CPU */
+/*******/
+
+void *infinite_loop(void *unused) {
+  while (1)
+    ;
+}
+
+char *store_mem = NULL;
+
+void alloc_mem(int n_gb) {
+  if (n_gb <= 0)
+    return;
+
+  size_t n_b = (size_t)n_gb * 1000 * 1000 * 1000;
+  store_mem = (char *)calloc(1, n_b);
+  if (!store_mem)
+    puts("malloc() failed."), exit(1);
+
+  for (size_t i = 0; i < n_b; i++)
+    store_mem[i] = 0;
+}
+
+
+void torture_cpu(void) {
     int numThreads = sysconf(_SC_NPROCESSORS_ONLN) - 1; // Get the number of processors.
     pthread_t threads[numThreads];
     int rc;
@@ -102,6 +110,6 @@ int main(int argc, char **argv) {
     CUDA_CHECK(cudaSetDevice(0));
 
     alloc_mem(n_gb);
-    load_threads();
+    torture_cpu();
     return 0;
 }
