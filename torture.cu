@@ -61,7 +61,8 @@ __global__ void gpu_torture_kernel(float **data_blocks, size_t n_blocks, size_t 
     }
 }
 
-void launch_gpu_torture() {
+void* launch_gpu_torture(void* arg) {
+  (void)arg;
     std::vector<float*> gpu_memory_blocks;
     size_t total_allocated = 0;
     
@@ -121,11 +122,6 @@ void launch_gpu_torture() {
     cudaFree(d_data_blocks);
 }
 
-void* gpu_torture_thread(void* arg) {
-    launch_gpu_torture();
-    return NULL;
-}
-
 /*******/
 /* CPU */
 /*******/
@@ -152,7 +148,8 @@ void alloc_mem(int n_gb) {
 
 
 void torture_cpu(void) {
-    int numThreads = sysconf(_SC_NPROCESSORS_ONLN) - 1; // Get the number of processors.
+    // Create one minus the number of CPUs threads. The last one is this thread.
+    int numThreads = sysconf(_SC_NPROCESSORS_ONLN) - 1; 
     pthread_t threads[numThreads];
     int rc;
     for (size_t t = 0; t < numThreads; t++) {
@@ -163,8 +160,7 @@ void torture_cpu(void) {
         }
     }
 
-    // Launch GPU torture in the main thread
-    launch_gpu_torture();
+    infinite_loop(NULL);
 }
 
 int main(int argc, char **argv) {
@@ -213,7 +209,7 @@ int main(int argc, char **argv) {
         }
 
         // Create GPU torture thread
-        if (pthread_create(&gpu_thread, NULL, gpu_torture_thread, NULL) != 0) {
+        if (pthread_create(&gpu_thread, NULL, launch_gpu_torture, NULL) != 0) {
             fprintf(stderr, "Failed to create GPU torture thread\n");
             return 1;
         }
@@ -221,11 +217,6 @@ int main(int argc, char **argv) {
 
     if (run_cpu) {
         torture_cpu();
-    }
-
-    // Clean up
-    if (run_gpu) {
-        pthread_join(gpu_thread, NULL);
     }
 
     return 0;
