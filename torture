@@ -1,17 +1,15 @@
 #if 0
 
-#Run as a bash script.
+# Run as a bash script.
 
-#Create a temp dir to compile into and run out of.
+# Create a temp dir to compile into and run out of.
 TMP="$(mktemp -d)"
 
-#Compile with nvcc if available, otherwise cc.
+# Compile with nvcc if available, otherwise cc.
 if command -v nvcc &> /dev/null
 then
-    echo "NVCC found, compiling with CUDA support"
     nvcc -o "$TMP/a.out" -x cu "$0" -O3 -lpthread && "$TMP/a.out" $@;
 else
-    echo "NVCC not found, compiling without CUDA support"
     cc -o "$TMP/a.out" -x c "$0" -O3 -lpthread && "$TMP/a.out" $@;
 fi
 
@@ -33,7 +31,7 @@ exit $RVAL
 
 #ifndef __CUDACC__
 #include <math.h>
-typedef int cudaError_t;
+#define cudaError_t int
 #define cudaSuccess 0
 #define cudaGetDeviceCount(count)                                              \
   (puts("Not compiled with NVCC, so --gpu is not available."), exit(1), 0)
@@ -189,16 +187,19 @@ static inline uint64_t xorshift64(uint64_t *a) {
 }
 
 static inline char *alloc_mem(size_t n_bytes) {
-  if (n_bytes == 0) {
-    n_bytes = ONE_GB; // Default to 1GB if no memory size is specified
-    printf("No memory size specified. Using default: 1.00 GB\n");
-  }
+  if (n_bytes == 0)
+    n_bytes = ONE_GB;
 
+  // Allocate all in one (virtual) block
   char *mem = (char *)calloc(1, n_bytes);
   if (!mem) {
     puts("malloc() failed.");
     exit(1);
   }
+
+  // Force the kernel to commit physical memory
+  for (size_t i = 0; i < n_bytes; i++)
+    mem[i] = 0;
 
   printf("CPU memory allocated: %.2f GB\n", (double)n_bytes / ONE_GB);
   return mem;
