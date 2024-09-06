@@ -65,7 +65,7 @@ __global__ void gpu_torture_kernel(float **data_blocks, size_t n_blocks, size_t 
 
 std::atomic<bool> gpu_torture_running(false);
 
-cudaError_t launch_gpu_torture() {
+void launch_gpu_torture() {
     gpu_torture_running.store(true);
     std::vector<float*> gpu_memory_blocks;
     size_t total_allocated = 0;
@@ -78,7 +78,8 @@ cudaError_t launch_gpu_torture() {
                 cudaGetLastError(); // Clear the error
                 break;  // We've used all available memory
             }
-            return err;
+            fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(err));
+            return;
         }
         
         gpu_memory_blocks.push_back(d_data);
@@ -93,16 +94,30 @@ cudaError_t launch_gpu_torture() {
     
     // Allocate and copy device pointers to GPU
     float **d_data_blocks;
-    CUDA_CHECK(cudaMalloc(&d_data_blocks, n_blocks * sizeof(float*)));
-    CUDA_CHECK(cudaMemcpy(d_data_blocks, gpu_memory_blocks.data(), n_blocks * sizeof(float*), cudaMemcpyHostToDevice));
+    if (cudaMalloc(&d_data_blocks, n_blocks * sizeof(float*)) != cudaSuccess) {
+        fprintf(stderr, "Failed to allocate device memory for data blocks\n");
+        return;
+    }
+    if (cudaMemcpy(d_data_blocks, gpu_memory_blocks.data(), n_blocks * sizeof(float*), cudaMemcpyHostToDevice) != cudaSuccess) {
+        fprintf(stderr, "Failed to copy data blocks to device\n");
+        return;
+    }
     
     dim3 block(BLOCK_SIZE);
     dim3 grid((total_elements + BLOCK_SIZE - 1) / BLOCK_SIZE);
     
     while (gpu_torture_running.load()) {
         gpu_torture_kernel<<<grid, block>>>(d_data_blocks, n_blocks, block_size);
-        CUDA_CHECK(cudaGetLastError());
-        CUDA_CHECK(cudaDeviceSynchronize());
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(err));
+            break;
+        }
+        err = cudaDeviceSynchronize();
+        if (err != cudaSuccess) {
+            fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(err));
+            break;
+        }
         puts("GPU torture kernel finished");
     }
     
@@ -111,15 +126,10 @@ cudaError_t launch_gpu_torture() {
         cudaFree(block);
     }
     cudaFree(d_data_blocks);
-    
-    return cudaSuccess;
 }
 
 void* gpu_torture_thread(void* arg) {
-    cudaError_t result = launch_gpu_torture();
-    if (result != cudaSuccess) {
-        fprintf(stderr, "GPU torture failed: %s\n", cudaGetErrorString(result));
-    }
+    launch_gpu_torture();
     return NULL;
 }
 
@@ -194,12 +204,20 @@ int main(int argc, char **argv) {
     if (run_gpu) {
         // Initialize CUDA
         int deviceCount;
-        CUDA_CHECK(cudaGetDeviceCount(&deviceCount));
+        cudaError_t err = cudaGetDeviceCount(&deviceCount);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(err));
+            return 1;
+        }
         if (deviceCount == 0) {
             fprintf(stderr, "No CUDA devices found\n");
-            exit(1);
+            return 1;
         }
-        CUDA_CHECK(cudaSetDevice(0));
+        err = cudaSetDevice(0);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(err));
+            return 1;
+        }
 
         // Create GPU torture thread
         if (pthread_create(&gpu_thread, NULL, gpu_torture_thread, NULL) != 0) {
@@ -210,11 +228,9 @@ int main(int argc, char **argv) {
 
     if (run_cpu) {
         torture_cpu();
-    }
-
-    // If both CPU and GPU are running, we need to keep the main thread alive
-    if (run_cpu && run_gpu) {
-        while(1) {
+    } else if (run_gpu) {
+        // If only GPU is running, we need to keep the main thread alive
+        while(gpu_torture_running.load()) {
             sleep(1);
         }
     }
