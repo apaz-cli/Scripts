@@ -66,11 +66,12 @@ __global__ void gpu_torture_kernel(float **data_blocks, size_t n_blocks, size_t 
 }
 
 void* launch_gpu_torture(void* arg) {
-  (void)arg;
-    std::vector<float*> gpu_memory_blocks;
+    (void)arg;
+    float* gpu_memory_blocks[MAX_GPU_BLOCKS];
     size_t total_allocated = 0;
+    size_t n_blocks = 0;
     
-    while (true) {
+    while (n_blocks < MAX_GPU_BLOCKS) {
         float* d_data;
         cudaError_t err = cudaMalloc(&d_data, HALF_GB);
         if (err != cudaSuccess) {
@@ -82,13 +83,12 @@ void* launch_gpu_torture(void* arg) {
             exit(1);
         }
         
-        gpu_memory_blocks.push_back(d_data);
+        gpu_memory_blocks[n_blocks++] = d_data;
         total_allocated += HALF_GB;
     }
     
     printf("Total GPU memory allocated: %.2f GB\n", (float)total_allocated / ONE_GB);
     
-    size_t n_blocks = gpu_memory_blocks.size();
     size_t block_size = HALF_GB / sizeof(float);
     size_t total_elements = n_blocks * block_size;
     
@@ -98,7 +98,7 @@ void* launch_gpu_torture(void* arg) {
         fprintf(stderr, "Failed to allocate device memory for data blocks\n");
         exit(1);
     }
-    if (cudaMemcpy(d_data_blocks, gpu_memory_blocks.data(), n_blocks * sizeof(float*), cudaMemcpyHostToDevice) != cudaSuccess) {
+    if (cudaMemcpy(d_data_blocks, gpu_memory_blocks, n_blocks * sizeof(float*), cudaMemcpyHostToDevice) != cudaSuccess) {
         fprintf(stderr, "Failed to copy data blocks to device\n");
         exit(1);
     }
