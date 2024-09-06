@@ -1,11 +1,11 @@
 #if 0
 
-# Run as a bash script.
+#Run as a bash script.
 
-# Create a temp dir to compile into and run out of.
+#Create a temp dir to compile into and run out of.
 TMP="$(mktemp -d)"
 
-# Compile with nvcc if available, otherwise cc.
+#Compile with nvcc if available, otherwise cc.
 if command -v nvcc &> /dev/null
 then
     echo "NVCC found, compiling with CUDA support"
@@ -21,22 +21,22 @@ exit $RVAL
 
 #endif
 
-
 #include <pthread.h>
 #include <sched.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/resource.h>
 #include <unistd.h>
-#include <string.h>
-#include <stdint.h>
-#include <stdbool.h>
 
 #ifndef __CUDACC__
 #include <math.h>
 typedef int cudaError_t;
 #define cudaSuccess 0
-#define cudaGetDeviceCount(count) (puts("Not compiled with NVCC, so --gpu is not available."), exit(1), 0)
+#define cudaGetDeviceCount(count)                                              \
+  (puts("Not compiled with NVCC, so --gpu is not available."), exit(1), 0)
 #define cudaSetDevice(device) 0
 #define cudaGetErrorString(err) ""
 #endif
@@ -54,119 +54,124 @@ typedef int cudaError_t;
 #define MAX_BLOCK_ALLOCS 4096 * 16
 #define BLOCK_SIZE 256
 
-#define CUDA_CHECK(call) \
-    do { \
-        cudaError_t _cu_error = call; \
-        if (_cu_error != cudaSuccess) { \
-            fprintf(stderr, "CUDA error at %s:%d - %s\n", __FILE__, __LINE__, \
-                    cudaGetErrorString(_cu_error)); \
-            return _cu_error; \
-        } \
-    } while(0)
+#define CUDA_CHECK(call)                                                       \
+  do {                                                                         \
+    cudaError_t _cu_error = call;                                              \
+    if (_cu_error != cudaSuccess) {                                            \
+      fprintf(stderr, "CUDA error at %s:%d - %s\n", __FILE__, __LINE__,        \
+              cudaGetErrorString(_cu_error));                                  \
+      return _cu_error;                                                        \
+    }                                                                          \
+  } while (0)
 
-__global__ void gpu_torture_kernel(float **data_blocks, size_t n_blocks, size_t block_size) {
-    size_t thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-    size_t total_elements = n_blocks * block_size;
-    
-    if (thread_id < total_elements) {
-        size_t block_idx = thread_id / block_size;
-        size_t element_idx = thread_id % block_size;
-        
-        float x = 1.0f;
-        float y = 2.0f;
-        float z = 3.0f;
-        
-        for (int i = 0; i < 1000000; i++) {
-            x = sinf(x) * cosf(y) * tanf(z);
-            y = expf(x) * logf(fabsf(y)) * sqrtf(fabsf(z));
-            z = powf(x, y) * fmodf(z, 3.14159f);
-            
-            // Access and modify data from different blocks
-            for (size_t j = 0; j < n_blocks; j++) {
-                size_t idx = (block_idx + j) % n_blocks;
-                float* block = data_blocks[idx];
-                float val = block[(element_idx + j) % block_size];
-                x += val;
-                y *= val;
-                z -= val;
-            }
-        }
-        
-        // Write results back to all blocks
-        for (size_t j = 0; j < n_blocks; j++) {
-            size_t idx = (block_idx + j) % n_blocks;
-            float* block = data_blocks[idx];
-            block[(element_idx + j) % block_size] = x + y + z;
-        }
+__global__ void gpu_torture_kernel(float **data_blocks, size_t n_blocks,
+                                   size_t block_size) {
+  size_t thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  size_t total_elements = n_blocks * block_size;
+
+  if (thread_id < total_elements) {
+    size_t block_idx = thread_id / block_size;
+    size_t element_idx = thread_id % block_size;
+
+    float x = 1.0f;
+    float y = 2.0f;
+    float z = 3.0f;
+
+    for (int i = 0; i < 1000000; i++) {
+      x = sinf(x) * cosf(y) * tanf(z);
+      y = expf(x) * logf(fabsf(y)) * sqrtf(fabsf(z));
+      z = powf(x, y) * fmodf(z, 3.14159f);
+
+      // Access and modify data from different blocks
+      for (size_t j = 0; j < n_blocks; j++) {
+        size_t idx = (block_idx + j) % n_blocks;
+        float *block = data_blocks[idx];
+        float val = block[(element_idx + j) % block_size];
+        x += val;
+        y *= val;
+        z -= val;
+      }
     }
+
+    // Write results back to all blocks
+    for (size_t j = 0; j < n_blocks; j++) {
+      size_t idx = (block_idx + j) % n_blocks;
+      float *block = data_blocks[idx];
+      block[(element_idx + j) % block_size] = x + y + z;
+    }
+  }
 }
 #endif
 
-void* launch_gpu_torture(void* arg) {
-    (void)arg;
+void *launch_gpu_torture(void *arg) {
+  (void)arg;
 
 #ifdef __CUDACC__
-    // Allocate almost all available GPU memory
-    size_t total_allocated = 0;
-    size_t n_blocks = 0;
-    float* gpu_memory_blocks[MAX_BLOCK_ALLOCS];
-    while (n_blocks < MAX_BLOCK_ALLOCS) {
-        float* d_data;
-        cudaError_t err = cudaMalloc(&d_data, HALF_GB);
-        if (err != cudaSuccess) {
-            if (err == cudaErrorMemoryAllocation) {
-                cudaGetLastError(); // Clear the error
-                break;
-            }
-            fprintf(stderr, "CUDA error allocating memory: %s\n", cudaGetErrorString(err));
-            exit(1);
-        }
-        
-        gpu_memory_blocks[n_blocks++] = d_data;
-        total_allocated += HALF_GB;
+  // Allocate almost all available GPU memory
+  size_t total_allocated = 0;
+  size_t n_blocks = 0;
+  float *gpu_memory_blocks[MAX_BLOCK_ALLOCS];
+  while (n_blocks < MAX_BLOCK_ALLOCS) {
+    float *d_data;
+    cudaError_t err = cudaMalloc(&d_data, HALF_GB);
+    if (err != cudaSuccess) {
+      if (err == cudaErrorMemoryAllocation) {
+        cudaGetLastError(); // Clear the error
+        break;
+      }
+      fprintf(stderr, "CUDA error allocating memory: %s\n",
+              cudaGetErrorString(err));
+      exit(1);
     }
 
-    printf("GPU memory allocated: %.2f GB\n", (float)total_allocated / ONE_GB);
-    
-    // Allocate and copy device pointers to GPU
-    size_t block_size = HALF_GB / sizeof(float);
-    size_t total_elements = n_blocks * block_size;
-    float **d_data_blocks;
-    if (cudaMalloc(&d_data_blocks, n_blocks * sizeof(float*)) != cudaSuccess) {
-        fprintf(stderr, "Failed to allocate device memory for data blocks\n");
-        exit(1);
-    }
-    if (cudaMemcpy(d_data_blocks, gpu_memory_blocks, n_blocks * sizeof(float*), cudaMemcpyHostToDevice) != cudaSuccess) {
-        fprintf(stderr, "Failed to copy data blocks to device\n");
-        exit(1);
-    }
-    
-    // Launch the kernel in an infinite loop.
-    while (true) {
-        // Launch the kernel
-        dim3 block(BLOCK_SIZE);
-        dim3 grid((total_elements + BLOCK_SIZE - 1) / BLOCK_SIZE);
-        gpu_torture_kernel<<<grid, block>>>(d_data_blocks, n_blocks, block_size);
+    gpu_memory_blocks[n_blocks++] = d_data;
+    total_allocated += HALF_GB;
+  }
 
-        // Check for errors
-        cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            fprintf(stderr, "CUDA error launching kernel: %s\n", cudaGetErrorString(err));
-            exit(1);
-        } 
+  printf("GPU memory allocated: %.2f GB\n", (float)total_allocated / ONE_GB);
 
-        // Wait for the kernel to complete
-        err = cudaDeviceSynchronize();
-        if (err != cudaSuccess) {
-            fprintf(stderr, "CUDA error synchronizing devices: %s\n", cudaGetErrorString(err));
-        } else {
-            puts("GPU torture kernel finished");
-        }
+  // Allocate and copy device pointers to GPU
+  size_t block_size = HALF_GB / sizeof(float);
+  size_t total_elements = n_blocks * block_size;
+  float **d_data_blocks;
+  if (cudaMalloc(&d_data_blocks, n_blocks * sizeof(float *)) != cudaSuccess) {
+    fprintf(stderr, "Failed to allocate device memory for data blocks\n");
+    exit(1);
+  }
+  if (cudaMemcpy(d_data_blocks, gpu_memory_blocks, n_blocks * sizeof(float *),
+                 cudaMemcpyHostToDevice) != cudaSuccess) {
+    fprintf(stderr, "Failed to copy data blocks to device\n");
+    exit(1);
+  }
+
+  // Launch the kernel in an infinite loop.
+  while (true) {
+    // Launch the kernel
+    dim3 block(BLOCK_SIZE);
+    dim3 grid((total_elements + BLOCK_SIZE - 1) / BLOCK_SIZE);
+    gpu_torture_kernel<<<grid, block>>>(d_data_blocks, n_blocks, block_size);
+
+    // Check for errors
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+      fprintf(stderr, "CUDA error launching kernel: %s\n",
+              cudaGetErrorString(err));
+      exit(1);
     }
+
+    // Wait for the kernel to complete
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+      fprintf(stderr, "CUDA error synchronizing devices: %s\n",
+              cudaGetErrorString(err));
+    } else {
+      puts("GPU torture kernel finished");
+    }
+  }
 #else
-    printf("GPU torture not available (compiled without CUDA support)\n");
+  printf("GPU torture not available (compiled without CUDA support)\n");
 #endif
-    return NULL;
+  return NULL;
 }
 
 /***************/
@@ -175,159 +180,163 @@ void* launch_gpu_torture(void* arg) {
 
 // PRNG stream
 static inline uint64_t xorshift64(uint64_t *a) {
-    uint64_t x = *a;
-    x ^= x << 13;
-    x ^= x >> 7;
-    x ^= x << 17;
-    *a = x; 
-    return x;
+  uint64_t x = *a;
+  x ^= x << 13;
+  x ^= x >> 7;
+  x ^= x << 17;
+  *a = x;
+  return x;
 }
 
 static inline char *alloc_mem(size_t n_bytes) {
-    if (n_bytes == 0)
-        return puts("CPU memory allocated: 0.00 GB"), (char*)NULL;
+  if (n_bytes == 0)
+    return puts("CPU memory allocated: 0.00 GB"), (char *)NULL;
 
-    char *mem = (char *)calloc(1, n_bytes);
-    if (!mem)
-        puts("malloc() failed."), exit(1);
+  char *mem = (char *)calloc(1, n_bytes);
+  if (!mem)
+    puts("malloc() failed."), exit(1);
 
-    for (size_t i = 0; i < n_bytes; i++)
-        mem[i] = 0;
+  for (size_t i = 0; i < n_bytes; i++)
+    mem[i] = 0;
 
-    return printf("CPU memory allocated: %.2f GB\n", (double)n_bytes / ONE_GB), mem;
+  return printf("CPU memory allocated: %.2f GB\n", (double)n_bytes / ONE_GB),
+         mem;
 }
 
 typedef struct {
-    char *mem;
-    size_t size;
-    uint64_t seed;
+  char *mem;
+  size_t size;
+  uint64_t seed;
 } ThreadArg;
 
 void *cpu_task(void *arg) {
-    ThreadArg *thread_arg = (ThreadArg *)arg;
-    char *mem = thread_arg->mem;
-    size_t size = thread_arg->size;
-    uint64_t prng_state = thread_arg->seed;
-    
-    while (1) {
-        for (size_t i = 0; i < size; i++) {
-            size_t pos = xorshift64(&prng_state) % size;
-            char value = (char)(xorshift64(&prng_state) & 0xFF);
-            mem[pos] = value;
-            // Force memory access
-            volatile char dummy = mem[pos];
-            (void)dummy;
-        }
+  ThreadArg *thread_arg = (ThreadArg *)arg;
+  char *mem = thread_arg->mem;
+  size_t size = thread_arg->size;
+  uint64_t prng_state = thread_arg->seed;
+
+  while (1) {
+    for (size_t i = 0; i < size; i++) {
+      size_t pos = xorshift64(&prng_state) % size;
+      char value = (char)(xorshift64(&prng_state) & 0xFF);
+      mem[pos] = value;
+      // Force memory access
+      volatile char dummy = mem[pos];
+      (void)dummy;
     }
-    return NULL;
+  }
+  return NULL;
 }
 
 static inline void torture_cpu(char *mem, size_t mem_size) {
-    int numThreads = sysconf(_SC_NPROCESSORS_ONLN);
-    pthread_t threads[numThreads];
-    ThreadArg thread_args[numThreads];
-    size_t chunk_size = mem_size / numThreads;
+  int numThreads = sysconf(_SC_NPROCESSORS_ONLN);
+  pthread_t threads[numThreads];
+  ThreadArg thread_args[numThreads];
+  size_t chunk_size = mem_size / numThreads;
 
-    // Use current time as a seed for the first thread
-    uint64_t seed = (uint64_t)time(NULL);
-    for (int t = 0; t < numThreads; t++) {
-        thread_args[t].mem = mem + t * chunk_size;
-        thread_args[t].size = (t == numThreads - 1) ? (mem_size - t * chunk_size) : chunk_size;
-        thread_args[t].seed = seed + t; // Use a different seed for each thread
-        int rc = pthread_create(&threads[t], NULL, cpu_task, &thread_args[t]);
-        if (rc) {
-            printf("ERROR; return code from pthread_create() is %d\n", rc);
-            exit(1);
-        }
+  // Use current time as a seed for the first thread
+  uint64_t seed = (uint64_t)time(NULL);
+  for (int t = 0; t < numThreads; t++) {
+    thread_args[t].mem = mem + t * chunk_size;
+    thread_args[t].size =
+        (t == numThreads - 1) ? (mem_size - t * chunk_size) : chunk_size;
+    thread_args[t].seed = seed + t; // Use a different seed for each thread
+    int rc = pthread_create(&threads[t], NULL, cpu_task, &thread_args[t]);
+    if (rc) {
+      printf("ERROR; return code from pthread_create() is %d\n", rc);
+      exit(1);
     }
+  }
 
-    for (int t = 0; t < numThreads; t++) {
-        pthread_join(threads[t], NULL);
-    }
+  for (int t = 0; t < numThreads; t++) {
+    pthread_join(threads[t], NULL);
+  }
 }
 
-
 int main(int argc, char **argv) {
-    size_t mem_bytes = 0;
-    bool run_cpu = false;
-    bool run_gpu = false;
+  size_t mem_bytes = 0;
+  bool run_cpu = false;
+  bool run_gpu = false;
 
-    // Parse command line arguments
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--cpu") == 0) {
-            run_cpu = true;
-        } else if (strcmp(argv[i], "--gpu") == 0) {
-            run_gpu = true;
-        } else if (strncmp(argv[i], "--mem=", strlen("--mem=")) == 0) {
-            char* mem_str = argv[i] + strlen("--mem=");
-            char* endptr;
-            double mem_value = strtod(mem_str, &endptr);
-            if (mem_value <= 0 || mem_str == endptr) {
-                fprintf(stderr, "Invalid memory value: %s\n", mem_str);
-                return 1;
-            }
-            if (*endptr == '\0' || strcasecmp(endptr, "B") == 0) {
-                mem_bytes = (size_t)mem_value;
-            } else if (strcasecmp(endptr, "K") == 0 || strcasecmp(endptr, "KB") == 0) {
-                mem_bytes = (size_t)(mem_value * 1024);
-            } else if (strcasecmp(endptr, "M") == 0 || strcasecmp(endptr, "MB") == 0) {
-                mem_bytes = (size_t)(mem_value * 1024 * 1024);
-            } else if (strcasecmp(endptr, "G") == 0 || strcasecmp(endptr, "GB") == 0) {
-                mem_bytes = (size_t)(mem_value * 1024 * 1024 * 1024);
-            } else {
-                fprintf(stderr, "Invalid memory unit: %s\n", endptr);
-                return 1;
-            }
-        } else {
-            fprintf(stderr, "Usage: %s [--cpu] [--gpu] [--mem=<size>[B|K|M|G]]\n", argv[0]);
-            return 1;
-        }
-    }
-
-    if (!run_cpu && !run_gpu) {
-        fprintf(stderr, "Error: At least one of --cpu or --gpu must be specified.\n");
+  // Parse command line arguments
+  for (int i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--cpu") == 0) {
+      run_cpu = true;
+    } else if (strcmp(argv[i], "--gpu") == 0) {
+      run_gpu = true;
+    } else if (strncmp(argv[i], "--mem=", strlen("--mem=")) == 0) {
+      char *mem_str = argv[i] + strlen("--mem=");
+      char *endptr;
+      double mem_value = strtod(mem_str, &endptr);
+      if (mem_value <= 0 || mem_str == endptr) {
+        fprintf(stderr, "Invalid memory value: %s\n", mem_str);
         return 1;
+      }
+      if (*endptr == '\0' || strcasecmp(endptr, "B") == 0) {
+        mem_bytes = (size_t)mem_value;
+      } else if (strcasecmp(endptr, "K") == 0 ||
+                 strcasecmp(endptr, "KB") == 0) {
+        mem_bytes = (size_t)(mem_value * 1024);
+      } else if (strcasecmp(endptr, "M") == 0 ||
+                 strcasecmp(endptr, "MB") == 0) {
+        mem_bytes = (size_t)(mem_value * 1024 * 1024);
+      } else if (strcasecmp(endptr, "G") == 0 ||
+                 strcasecmp(endptr, "GB") == 0) {
+        mem_bytes = (size_t)(mem_value * 1024 * 1024 * 1024);
+      } else {
+        fprintf(stderr, "Invalid memory unit: %s\n", endptr);
+        return 1;
+      }
+    } else {
+      fprintf(stderr, "Usage: %s [--cpu] [--gpu] [--mem=<size>[B|K|M|G]]\n",
+              argv[0]);
+      return 1;
+    }
+  }
+
+  if (!run_cpu && !run_gpu) {
+    fprintf(stderr,
+            "Error: At least one of --cpu or --gpu must be specified.\n");
+    return 1;
+  }
+
+  pthread_t gpu_thread;
+  if (run_gpu) {
+    // Initialize CUDA
+    int deviceCount;
+    cudaError_t err = cudaGetDeviceCount(&deviceCount);
+    if (err != cudaSuccess) {
+      fprintf(stderr, "CUDA error getting device count: %s\n",
+              cudaGetErrorString(err));
+      return 1;
+    }
+    if (deviceCount == 0) {
+      fprintf(stderr, "No CUDA devices found\n");
+      return 1;
+    }
+    err = cudaSetDevice(0);
+    if (err != cudaSuccess) {
+      fprintf(stderr, "CUDA error setting device: %s\n",
+              cudaGetErrorString(err));
+      return 1;
     }
 
-    pthread_t gpu_thread;
-    if (run_gpu) {
-        // Initialize CUDA
-        int deviceCount;
-        cudaError_t err = cudaGetDeviceCount(&deviceCount);
-        if (err != cudaSuccess) {
-            fprintf(stderr, "CUDA error getting device count: %s\n", cudaGetErrorString(err));
-            return 1;
-        }
-        if (deviceCount == 0) {
-            fprintf(stderr, "No CUDA devices found\n");
-            return 1;
-        }
-        err = cudaSetDevice(0);
-        if (err != cudaSuccess) {
-            fprintf(stderr, "CUDA error setting device: %s\n", cudaGetErrorString(err));
-            return 1;
-        }
-
-        // Create GPU torture thread
-        if (pthread_create(&gpu_thread, NULL, launch_gpu_torture, NULL) != 0) {
-            fprintf(stderr, "Failed to create GPU torture thread\n");
-            return 1;
-        }
+    // Create GPU torture thread
+    if (pthread_create(&gpu_thread, NULL, launch_gpu_torture, NULL) != 0) {
+      fprintf(stderr, "Failed to create GPU torture thread\n");
+      return 1;
     }
+  }
 
-    char *allocated_mem = alloc_mem(mem_bytes);
+  char *allocated_mem = alloc_mem(mem_bytes);
 
-    if (run_cpu) {
-        torture_cpu(allocated_mem, mem_bytes);
-    }
+  if (run_cpu) {
+    torture_cpu(allocated_mem, mem_bytes);
+  }
 
-    // Wait for GPU thread to finish if it was started
-    if (run_gpu) {
-        pthread_join(gpu_thread, NULL);
-    }
+  while (1) {
+    sleep(1);
+  }
 
-    // Free allocated memory
-    free(allocated_mem);
-
-    return 0;
+  return 0;
 }
