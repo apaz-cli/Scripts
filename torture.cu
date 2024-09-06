@@ -8,9 +8,6 @@
 #include <stdint.h>
 #include <time.h>
 
-
-
-
 #define ONE_GB (size_t)(1024 * 1024 * 1024)
 #define HALF_GB (ONE_GB / 2)
 
@@ -18,7 +15,7 @@
 /* GPU Torture */
 /***************/
 
-#ifndef __CUDACC__
+#ifdef __CUDACC__
 #include <cuda_runtime.h>
 
 #define MAX_BLOCK_ALLOCS 4096 * 16
@@ -70,12 +67,12 @@ __global__ void gpu_torture_kernel(float **data_blocks, size_t n_blocks, size_t 
         }
     }
 }
-
 #endif
 
 void* launch_gpu_torture(void* arg) {
     (void)arg;
 
+#ifdef __CUDACC__
     // Allocate almost all available GPU memory
     size_t total_allocated = 0;
     size_t n_blocks = 0;
@@ -113,7 +110,6 @@ void* launch_gpu_torture(void* arg) {
     
     // Launch the kernel in an infinite loop.
     while (true) {
-
         // Launch the kernel
         dim3 block(BLOCK_SIZE);
         dim3 grid((total_elements + BLOCK_SIZE - 1) / BLOCK_SIZE);
@@ -133,8 +129,11 @@ void* launch_gpu_torture(void* arg) {
         } else {
             puts("GPU torture kernel finished");
         }
-        
     }
+#else
+    printf("GPU torture not available (compiled without CUDA support)\n");
+#endif
+    return NULL;
 }
 
 /***************/
