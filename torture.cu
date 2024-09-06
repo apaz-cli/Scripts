@@ -43,7 +43,8 @@ cudaError_t launch_gpu_torture() {
         float* d_data;
         cudaError_t err = cudaMalloc(&d_data, HALF_GB);
         if (err != cudaSuccess) {
-            if (err == cudaError_t::cudaErrorOutOfMemory) {
+            if (err == cudaErrorMemoryAllocation) {
+                cudaGetLastError(); // Clear the error
                 break;  // We've used all available memory
             }
             return err;
@@ -59,25 +60,13 @@ cudaError_t launch_gpu_torture() {
     dim3 block(BLOCK_SIZE);
     dim3 grid((n + BLOCK_SIZE - 1) / BLOCK_SIZE);
     
-    bool continue_torture = true;
-    while (continue_torture) {
+    while (1) {
         for (float* d_data : gpu_memory_blocks) {
             gpu_torture_kernel<<<grid, block>>>(d_data, n);
             CUDA_CHECK(cudaGetLastError());
         }
         CUDA_CHECK(cudaDeviceSynchronize());
         puts("GPU torture kernel finished");
-        
-        // Add a condition to potentially break the loop
-        // For example, you could check for a specific file's existence
-        // if (file_exists("stop_torture")) {
-        //     continue_torture = false;
-        // }
-    }
-    
-    // We never reach here, but for completeness:
-    for (float* d_data : gpu_memory_blocks) {
-        cudaFree(d_data);
     }
     
     return cudaSuccess;
