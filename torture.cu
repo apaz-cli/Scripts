@@ -4,19 +4,25 @@
 #include <stdlib.h>
 #include <sys/resource.h>
 #include <unistd.h>
-#include <cuda_runtime.h>
 #include <string.h>
 #include <stdint.h>
 #include <time.h>
 
-#define MAX_GPU_BLOCKS 1024  // Adjust this value based on your needs
-/*******/
-/* GPU */
-/*******/
 
-#define BLOCK_SIZE 256
+
+
 #define ONE_GB (size_t)(1024 * 1024 * 1024)
 #define HALF_GB (ONE_GB / 2)
+
+/***************/
+/* GPU Torture */
+/***************/
+
+#ifndef __CUDACC__
+#include <cuda_runtime.h>
+
+#define MAX_BLOCK_ALLOCS 4096 * 16
+#define BLOCK_SIZE 256
 
 #define CUDA_CHECK(call) \
     do { \
@@ -65,19 +71,22 @@ __global__ void gpu_torture_kernel(float **data_blocks, size_t n_blocks, size_t 
     }
 }
 
+#endif
+
 void* launch_gpu_torture(void* arg) {
     (void)arg;
-    float* gpu_memory_blocks[MAX_GPU_BLOCKS];
+
+    // Allocate almost all available GPU memory
     size_t total_allocated = 0;
     size_t n_blocks = 0;
-    
-    while (n_blocks < MAX_GPU_BLOCKS) {
+    float* gpu_memory_blocks[MAX_BLOCK_ALLOCS];
+    while (n_blocks < MAX_BLOCK_ALLOCS) {
         float* d_data;
         cudaError_t err = cudaMalloc(&d_data, HALF_GB);
         if (err != cudaSuccess) {
             if (err == cudaErrorMemoryAllocation) {
                 cudaGetLastError(); // Clear the error
-                break;  // We've used all available memory
+                break;
             }
             fprintf(stderr, "CUDA error allocating memory: %s\n", cudaGetErrorString(err));
             exit(1);
@@ -86,13 +95,12 @@ void* launch_gpu_torture(void* arg) {
         gpu_memory_blocks[n_blocks++] = d_data;
         total_allocated += HALF_GB;
     }
-    
-    printf("Total GPU memory allocated: %.2f GB\n", (float)total_allocated / ONE_GB);
-    
-    size_t block_size = HALF_GB / sizeof(float);
-    size_t total_elements = n_blocks * block_size;
+
+    printf("GPU memory allocated: %.2f GB\n", (float)total_allocated / ONE_GB);
     
     // Allocate and copy device pointers to GPU
+    size_t block_size = HALF_GB / sizeof(float);
+    size_t total_elements = n_blocks * block_size;
     float **d_data_blocks;
     if (cudaMalloc(&d_data_blocks, n_blocks * sizeof(float*)) != cudaSuccess) {
         fprintf(stderr, "Failed to allocate device memory for data blocks\n");
@@ -103,6 +111,7 @@ void* launch_gpu_torture(void* arg) {
         exit(1);
     }
     
+    // Launch the kernel in an infinite loop.
     while (true) {
 
         // Launch the kernel
@@ -128,38 +137,32 @@ void* launch_gpu_torture(void* arg) {
     }
 }
 
-/*******/
-/* CPU */
-/*******/
+/***************/
+/* CPU Torture */
+/***************/
 
-// Xorshift64 PRNG implementation
-struct xorshift64_state {
-    uint64_t a;
-};
-
-uint64_t xorshift64(struct xorshift64_state *state) {
-    uint64_t x = state->a;
+// PRNG stream
+static inline uint64_t xorshift64(uint64_t *a) {
+    uint64_t x = *a;
     x ^= x << 13;
     x ^= x >> 7;
     x ^= x << 17;
-    return state->a = x;
+    *a = x; 
+    return x;
 }
 
-
-char *alloc_mem(size_t n_bytes) {
+static inline char *alloc_mem(size_t n_bytes) {
     if (n_bytes == 0)
-        return NULL;
+        return puts("CPU memory allocated: 0.00 GB"), (char*)NULL;
 
     char *mem = (char *)calloc(1, n_bytes);
-    if (!mem) {
+    if (!mem)
         puts("malloc() failed."), exit(1);
-    }
 
     for (size_t i = 0; i < n_bytes; i++)
         mem[i] = 0;
 
-    printf("Allocated %.2f GB of memory\n", (double)n_bytes / ONE_GB);
-    return mem;
+    return printf("CPU memory allocated: %.2f GB\n", (double)n_bytes / ONE_GB), mem;
 }
 
 typedef struct {
@@ -172,12 +175,12 @@ void *cpu_task(void *arg) {
     ThreadArg *thread_arg = (ThreadArg *)arg;
     char *mem = thread_arg->mem;
     size_t size = thread_arg->size;
-    struct xorshift64_state state = {thread_arg->seed};
+    uint64_t prng_state = thread_arg->seed;
     
     while (1) {
         for (size_t i = 0; i < size; i++) {
-            size_t pos = xorshift64(&state) % size;
-            char value = (char)(xorshift64(&state) & 0xFF);
+            size_t pos = xorshift64(&prng_state) % size;
+            char value = (char)(xorshift64(&prng_state) & 0xFF);
             mem[pos] = value;
             // Force memory access
             volatile char dummy = mem[pos];
@@ -187,7 +190,7 @@ void *cpu_task(void *arg) {
     return NULL;
 }
 
-void torture_cpu(char *mem, size_t mem_size) {
+static inline void torture_cpu(char *mem, size_t mem_size) {
     int numThreads = sysconf(_SC_NPROCESSORS_ONLN);
     pthread_t threads[numThreads];
     ThreadArg thread_args[numThreads];
