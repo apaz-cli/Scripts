@@ -1,5 +1,10 @@
 #!/bin/sh
 
+if [ -z "$REPOS_DIR" ]; then
+    echo "REPOS_DIR is not set."
+    exit 1
+fi
+
 CURRENT_WD="$(pwd)"
 AIDER_DIR="$REPOS_DIR/aider"
 AIDER_BIN="$AIDER_DIR/bin/aider"
@@ -15,4 +20,4 @@ if [ ! -d "$AIDER_DIR" ]; then
 fi
 
 cd "$CURRENT_WD"
-$AIDER_BIN "$@"
+$AIDER_BIN --dark-mode "$@"
