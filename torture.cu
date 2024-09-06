@@ -133,11 +133,11 @@ void *infinite_loop(void *unused) {
 
 char *store_mem = NULL;
 
-void alloc_mem(int n_gb) {
-  if (n_gb <= 0)
+void alloc_mem(size_t n_bytes) {
+  if (n_bytes == 0)
     return;
 
-  size_t n_b = (size_t)n_gb * 1000 * 1000 * 1000;
+  size_t n_b = n_bytes;
   store_mem = (char *)calloc(1, n_b);
   if (!store_mem)
     puts("malloc() failed."), exit(1);
@@ -164,7 +164,7 @@ void torture_cpu(void) {
 }
 
 int main(int argc, char **argv) {
-    int n_gb = 0;
+    size_t mem_bytes = 0;
     bool run_cpu = false;
     bool run_gpu = false;
 
@@ -175,9 +175,27 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "--gpu") == 0) {
             run_gpu = true;
         } else if (strncmp(argv[i], "--mem=", 6) == 0) {
-            n_gb = atoi(argv[i] + 6);
+            char* mem_str = argv[i] + 6;
+            char* endptr;
+            double mem_value = strtod(mem_str, &endptr);
+            if (mem_value <= 0 || mem_str == endptr) {
+                fprintf(stderr, "Invalid memory value: %s\n", mem_str);
+                return 1;
+            }
+            if (*endptr == '\0' || strcasecmp(endptr, "B") == 0) {
+                mem_bytes = (size_t)mem_value;
+            } else if (strcasecmp(endptr, "K") == 0 || strcasecmp(endptr, "KB") == 0) {
+                mem_bytes = (size_t)(mem_value * 1024);
+            } else if (strcasecmp(endptr, "M") == 0 || strcasecmp(endptr, "MB") == 0) {
+                mem_bytes = (size_t)(mem_value * 1024 * 1024);
+            } else if (strcasecmp(endptr, "G") == 0 || strcasecmp(endptr, "GB") == 0) {
+                mem_bytes = (size_t)(mem_value * 1024 * 1024 * 1024);
+            } else {
+                fprintf(stderr, "Invalid memory unit: %s\n", endptr);
+                return 1;
+            }
         } else {
-            fprintf(stderr, "Usage: %s [--cpu] [--gpu] [--mem=<n_gb>]\n", argv[0]);
+            fprintf(stderr, "Usage: %s [--cpu] [--gpu] [--mem=<size>[B|K|M|G]]\n", argv[0]);
             return 1;
         }
     }
@@ -187,7 +205,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    alloc_mem(n_gb);
+    alloc_mem(mem_bytes);
 
     pthread_t gpu_thread;
     if (run_gpu) {
