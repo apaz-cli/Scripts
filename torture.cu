@@ -7,8 +7,6 @@
 #include <cuda_runtime.h>
 #include <vector>
 #include <string.h>
-#include <atomic>
-
 /*******/
 /* GPU */
 /*******/
@@ -63,10 +61,7 @@ __global__ void gpu_torture_kernel(float **data_blocks, size_t n_blocks, size_t 
     }
 }
 
-std::atomic<bool> gpu_torture_running(false);
-
 void launch_gpu_torture() {
-    gpu_torture_running.store(true);
     std::vector<float*> gpu_memory_blocks;
     size_t total_allocated = 0;
     
@@ -105,22 +100,20 @@ void launch_gpu_torture() {
     
     dim3 block(BLOCK_SIZE);
     dim3 grid((total_elements + BLOCK_SIZE - 1) / BLOCK_SIZE);
-    
-    while (gpu_torture_running.load()) {
-        gpu_torture_kernel<<<grid, block>>>(d_data_blocks, n_blocks, block_size);
-        cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(err));
-            break;
-        }
+
+    gpu_torture_kernel<<<grid, block>>>(d_data_blocks, n_blocks, block_size);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(err));
+    } else {
         err = cudaDeviceSynchronize();
         if (err != cudaSuccess) {
             fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(err));
-            break;
+        } else {
+            puts("GPU torture kernel finished");
         }
-        puts("GPU torture kernel finished");
     }
-    
+
     // Free allocated memory
     for (auto block : gpu_memory_blocks) {
         cudaFree(block);
@@ -228,16 +221,10 @@ int main(int argc, char **argv) {
 
     if (run_cpu) {
         torture_cpu();
-    } else if (run_gpu) {
-        // If only GPU is running, we need to keep the main thread alive
-        while(gpu_torture_running.load()) {
-            sleep(1);
-        }
     }
 
     // Clean up
     if (run_gpu) {
-        gpu_torture_running.store(false);
         pthread_join(gpu_thread, NULL);
     }
 
