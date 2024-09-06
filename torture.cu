@@ -12,7 +12,8 @@
 /*******/
 
 #define BLOCK_SIZE 256
-#define HALF_GB (size_t)(512 * 1024 * 1024)
+#define ONE_GB (size_t)(1024 * 1024 * 1024)
+#define HALF_GB (ONE_GB / 2)
 
 #define CUDA_CHECK(call) \
     do { \
@@ -74,15 +75,15 @@ void* launch_gpu_torture(void* arg) {
                 cudaGetLastError(); // Clear the error
                 break;  // We've used all available memory
             }
-            fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(err));
-            return;
+            fprintf(stderr, "CUDA error allocating memory: %s\n", cudaGetErrorString(err));
+            exit(1);
         }
         
         gpu_memory_blocks.push_back(d_data);
         total_allocated += HALF_GB;
     }
     
-    printf("Total GPU memory allocated: %.2f GB\n", total_allocated / (1024.0 * 1024.0 * 1024.0));
+    printf("Total GPU memory allocated: %.2f GB\n", total_allocated / ONE_GB);
     
     size_t n_blocks = gpu_memory_blocks.size();
     size_t block_size = HALF_GB / sizeof(float);
@@ -92,34 +93,36 @@ void* launch_gpu_torture(void* arg) {
     float **d_data_blocks;
     if (cudaMalloc(&d_data_blocks, n_blocks * sizeof(float*)) != cudaSuccess) {
         fprintf(stderr, "Failed to allocate device memory for data blocks\n");
-        return;
+        exit(1);
     }
     if (cudaMemcpy(d_data_blocks, gpu_memory_blocks.data(), n_blocks * sizeof(float*), cudaMemcpyHostToDevice) != cudaSuccess) {
         fprintf(stderr, "Failed to copy data blocks to device\n");
-        return;
+        exit(1);
     }
     
-    dim3 block(BLOCK_SIZE);
-    dim3 grid((total_elements + BLOCK_SIZE - 1) / BLOCK_SIZE);
+    while (true) {
 
-    gpu_torture_kernel<<<grid, block>>>(d_data_blocks, n_blocks, block_size);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(err));
-    } else {
+        // Launch the kernel
+        dim3 block(BLOCK_SIZE);
+        dim3 grid((total_elements + BLOCK_SIZE - 1) / BLOCK_SIZE);
+        gpu_torture_kernel<<<grid, block>>>(d_data_blocks, n_blocks, block_size);
+
+        // Check for errors
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            fprintf(stderr, "CUDA error launching kernel: %s\n", cudaGetErrorString(err));
+            exit(1);
+        } 
+
+        // Wait for the kernel to complete
         err = cudaDeviceSynchronize();
         if (err != cudaSuccess) {
-            fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(err));
+            fprintf(stderr, "CUDA error synchronizing devices: %s\n", cudaGetErrorString(err));
         } else {
             puts("GPU torture kernel finished");
         }
+        
     }
-
-    // Free allocated memory
-    for (auto block : gpu_memory_blocks) {
-        cudaFree(block);
-    }
-    cudaFree(d_data_blocks);
 }
 
 /*******/
@@ -144,8 +147,9 @@ void alloc_mem(size_t n_bytes) {
 
   for (size_t i = 0; i < n_b; i++)
     store_mem[i] = 0;
-}
 
+  printf("Allocated %.2f GB of memory\n", n_bytes / ONE_GB);
+}
 
 void torture_cpu(void) {
     // Create one minus the number of CPUs threads. The last one is this thread.
@@ -163,7 +167,9 @@ void torture_cpu(void) {
     infinite_loop(NULL);
 }
 
+
 int main(int argc, char **argv) {
+    size_t memsz = strlen("--mem=") + 1;
     size_t mem_bytes = 0;
     bool run_cpu = false;
     bool run_gpu = false;
@@ -174,8 +180,8 @@ int main(int argc, char **argv) {
             run_cpu = true;
         } else if (strcmp(argv[i], "--gpu") == 0) {
             run_gpu = true;
-        } else if (strncmp(argv[i], "--mem=", 6) == 0) {
-            char* mem_str = argv[i] + 6;
+        } else if (strncmp(argv[i], "--mem=", memsz) == 0) {
+            char* mem_str = argv[i] + memsz;
             char* endptr;
             double mem_value = strtod(mem_str, &endptr);
             if (mem_value <= 0 || mem_str == endptr) {
@@ -213,7 +219,7 @@ int main(int argc, char **argv) {
         int deviceCount;
         cudaError_t err = cudaGetDeviceCount(&deviceCount);
         if (err != cudaSuccess) {
-            fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(err));
+            fprintf(stderr, "CUDA error getting device count: %s\n", cudaGetErrorString(err));
             return 1;
         }
         if (deviceCount == 0) {
@@ -222,7 +228,7 @@ int main(int argc, char **argv) {
         }
         err = cudaSetDevice(0);
         if (err != cudaSuccess) {
-            fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(err));
+            fprintf(stderr, "CUDA error setting device: %s\n", cudaGetErrorString(err));
             return 1;
         }
 
