@@ -5,10 +5,11 @@
 #include <sys/resource.h>
 #include <unistd.h>
 #include <cuda_runtime.h>
-#include <vector>
 #include <string.h>
 #include <stdint.h>
 #include <time.h>
+
+#define MAX_GPU_BLOCKS 1024  // Adjust this value based on your needs
 /*******/
 /* GPU */
 /*******/
