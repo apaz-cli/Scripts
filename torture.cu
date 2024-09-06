@@ -5,13 +5,14 @@
 #include <sys/resource.h>
 #include <unistd.h>
 #include <cuda_runtime.h>
+#include <vector>
 
 /*******/
 /* GPU */
 /*******/
 
 #define BLOCK_SIZE 256
-#define NUM_BLOCKS 1024
+#define HALF_GB (size_t)(512 * 1024 * 1024)
 
 #define CUDA_CHECK(call) \
     do { \
@@ -19,13 +20,12 @@
         if (_cu_error != cudaSuccess) { \
             fprintf(stderr, "CUDA error at %s:%d - %s\n", __FILE__, __LINE__, \
                     cudaGetErrorString(_cu_error)); \
-            exit(1); \
+            return _cu_error; \
         } \
     } while(0)
 
-
-__global__ void gpu_torture_kernel(float *data, int n) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void gpu_torture_kernel(float *data, size_t n) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n) {
         float x = 1.0f;
         for (int i = 0; i < 1000000; i++) {
@@ -35,19 +35,45 @@ __global__ void gpu_torture_kernel(float *data, int n) {
     }
 }
 
-void launch_gpu_torture() {
-    int n = BLOCK_SIZE * NUM_BLOCKS;
-    float *d_data;
-    CUDA_CHECK(cudaMalloc(&d_data, n * sizeof(float)));
-
+cudaError_t launch_gpu_torture() {
+    std::vector<float*> gpu_memory_blocks;
+    size_t total_allocated = 0;
+    
+    while (true) {
+        float* d_data;
+        cudaError_t err = cudaMalloc(&d_data, HALF_GB);
+        if (err != cudaSuccess) {
+            if (err == cudaErrorOutOfMemory) {
+                break;  // We've used all available memory
+            }
+            return err;
+        }
+        
+        gpu_memory_blocks.push_back(d_data);
+        total_allocated += HALF_GB;
+    }
+    
+    printf("Total GPU memory allocated: %.2f GB\n", total_allocated / (1024.0 * 1024.0 * 1024.0));
+    
+    size_t n = total_allocated / sizeof(float);
     dim3 block(BLOCK_SIZE);
-    dim3 grid(NUM_BLOCKS);
-
+    dim3 grid((n + BLOCK_SIZE - 1) / BLOCK_SIZE);
+    
     while (1) {
-        gpu_torture_kernel<<<grid, block>>>(d_data, n);
+        for (float* d_data : gpu_memory_blocks) {
+            gpu_torture_kernel<<<grid, block>>>(d_data, n);
+            CUDA_CHECK(cudaGetLastError());
+        }
         CUDA_CHECK(cudaDeviceSynchronize());
         puts("GPU torture kernel finished");
     }
+    
+    // We never reach here, but for completeness:
+    for (float* d_data : gpu_memory_blocks) {
+        cudaFree(d_data);
+    }
+    
+    return cudaSuccess;
 }
 
 /*******/
@@ -110,6 +136,13 @@ int main(int argc, char **argv) {
     CUDA_CHECK(cudaSetDevice(0));
 
     alloc_mem(n_gb);
+    
+    cudaError_t result = launch_gpu_torture();
+    if (result != cudaSuccess) {
+        fprintf(stderr, "GPU torture failed: %s\n", cudaGetErrorString(result));
+        return 1;
+    }
+    
     torture_cpu();
     return 0;
 }
