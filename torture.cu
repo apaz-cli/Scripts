@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <cuda_runtime.h>
 #include <vector>
+#include <string.h>
 
 /*******/
 /* GPU */
@@ -146,31 +147,58 @@ void torture_cpu(void) {
 }
 
 int main(int argc, char **argv) {
-    int n_gb = -1;
-    if (argc < 2)
-        n_gb = 0;
-    else if (argc == 2)
-        n_gb = atoi(argv[1]);
-    else
-        return puts("Usage: load_all_threads <n_gb>"), 1;
+    int n_gb = 0;
+    bool run_cpu = false;
+    bool run_gpu = false;
 
-    // Initialize CUDA
-    int deviceCount;
-    CUDA_CHECK(cudaGetDeviceCount(&deviceCount));
-    if (deviceCount == 0) {
-        fprintf(stderr, "No CUDA devices found\n");
-        exit(1);
+    // Parse command line arguments
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--cpu") == 0) {
+            run_cpu = true;
+        } else if (strcmp(argv[i], "--gpu") == 0) {
+            run_gpu = true;
+        } else if (strncmp(argv[i], "--mem=", 6) == 0) {
+            n_gb = atoi(argv[i] + 6);
+        } else {
+            fprintf(stderr, "Usage: %s [--cpu] [--gpu] [--mem=<n_gb>]\n", argv[0]);
+            return 1;
+        }
     }
-    CUDA_CHECK(cudaSetDevice(0));
 
-    alloc_mem(n_gb);
-    
-    cudaError_t result = launch_gpu_torture();
-    if (result != cudaSuccess) {
-        fprintf(stderr, "GPU torture failed: %s\n", cudaGetErrorString(result));
+    if (!run_cpu && !run_gpu) {
+        fprintf(stderr, "Error: At least one of --cpu or --gpu must be specified.\n");
         return 1;
     }
-    
-    torture_cpu();
+
+    alloc_mem(n_gb);
+
+    if (run_gpu) {
+        // Initialize CUDA
+        int deviceCount;
+        CUDA_CHECK(cudaGetDeviceCount(&deviceCount));
+        if (deviceCount == 0) {
+            fprintf(stderr, "No CUDA devices found\n");
+            exit(1);
+        }
+        CUDA_CHECK(cudaSetDevice(0));
+
+        cudaError_t result = launch_gpu_torture();
+        if (result != cudaSuccess) {
+            fprintf(stderr, "GPU torture failed: %s\n", cudaGetErrorString(result));
+            return 1;
+        }
+    }
+
+    if (run_cpu) {
+        torture_cpu();
+    }
+
+    // If both CPU and GPU are running, we need to keep the main thread alive
+    if (run_cpu && run_gpu) {
+        while(1) {
+            sleep(1);
+        }
+    }
+
     return 0;
 }
