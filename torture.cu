@@ -129,10 +129,6 @@ void* launch_gpu_torture(void* arg) {
 /* CPU */
 /*******/
 
-void *infinite_loop(void *unused) {
-  while (1)
-    ;
-}
 
 char *alloc_mem(size_t n_bytes) {
     if (n_bytes == 0)
@@ -192,7 +188,6 @@ void torture_cpu(char *mem, size_t mem_size) {
 
 
 int main(int argc, char **argv) {
-    size_t memsz = strlen("--mem=") + 1;
     size_t mem_bytes = 0;
     bool run_cpu = false;
     bool run_gpu = false;
@@ -203,8 +198,8 @@ int main(int argc, char **argv) {
             run_cpu = true;
         } else if (strcmp(argv[i], "--gpu") == 0) {
             run_gpu = true;
-        } else if (strncmp(argv[i], "--mem=", memsz) == 0) {
-            char* mem_str = argv[i] + memsz;
+        } else if (strncmp(argv[i], "--mem=", strlen("--mem=")) == 0) {
+            char* mem_str = argv[i] + strlen("--mem=");
             char* endptr;
             double mem_value = strtod(mem_str, &endptr);
             if (mem_value <= 0 || mem_str == endptr) {
