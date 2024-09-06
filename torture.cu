@@ -7,6 +7,15 @@
 #include <string.h>
 #include <stdint.h>
 #include <time.h>
+#include <stdbool.h>
+
+#ifndef __CUDACC__
+typedef int cudaError_t;
+#define cudaSuccess 0
+#define cudaGetDeviceCount(count) (*(count) = 0)
+#define cudaSetDevice(device) 0
+#define cudaGetErrorString(err) "CUDA not available"
+#endif
 
 #define ONE_GB (size_t)(1024 * 1024 * 1024)
 #define HALF_GB (ONE_GB / 2)
