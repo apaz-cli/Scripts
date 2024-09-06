@@ -1,3 +1,27 @@
+#if 0
+
+# Run as a bash script.
+
+# Create a temp dir to compile into and run out of.
+TMP="$(mktemp -d)"
+
+# Compile with nvcc if available, otherwise cc.
+if command -v nvcc &> /dev/null
+then
+    echo "NVCC found, compiling with CUDA support"
+    nvcc -o "$TMP/a.out" -x cu "$0" -O3 -lpthread && "$TMP/a.out" $@;
+else
+    echo "NVCC not found, compiling without CUDA support"
+    cc -o "$TMP/a.out" -x c "$0" -O3 -lpthread && "$TMP/a.out" $@;
+fi
+
+RVAL=$?;
+rm -rf "$TMP";
+exit $RVAL
+
+#endif
+
+
 #include <pthread.h>
 #include <sched.h>
 #include <stdio.h>
@@ -6,15 +30,15 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdint.h>
-#include <time.h>
 #include <stdbool.h>
 
 #ifndef __CUDACC__
+#include <math.h>
 typedef int cudaError_t;
 #define cudaSuccess 0
-#define cudaGetDeviceCount(count) (*(count) = 0)
+#define cudaGetDeviceCount(count) (puts("Not compiled with NVCC, so --gpu is not available."), exit(1), 0)
 #define cudaSetDevice(device) 0
-#define cudaGetErrorString(err) "CUDA not available"
+#define cudaGetErrorString(err) ""
 #endif
 
 #define ONE_GB (size_t)(1024 * 1024 * 1024)
@@ -265,8 +289,6 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    char *allocated_mem = alloc_mem(mem_bytes);
-
     pthread_t gpu_thread;
     if (run_gpu) {
         // Initialize CUDA
@@ -292,6 +314,8 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
+
+    char *allocated_mem = alloc_mem(mem_bytes);
 
     if (run_cpu) {
         torture_cpu(allocated_mem, mem_bytes);
