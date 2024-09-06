@@ -85,7 +85,7 @@ void* launch_gpu_torture(void* arg) {
         total_allocated += HALF_GB;
     }
     
-    printf("Total GPU memory allocated: %.2f GB\n", (float)(total_allocated / ONE_GB));
+    printf("Total GPU memory allocated: %.2f GB\n", (double)total_allocated / ONE_GB);
     
     size_t n_blocks = gpu_memory_blocks.size();
     size_t block_size = HALF_GB / sizeof(float);
@@ -157,7 +157,7 @@ char *alloc_mem(size_t n_bytes) {
     for (size_t i = 0; i < n_bytes; i++)
         mem[i] = 0;
 
-    printf("Allocated %.2f GB of memory\n", n_bytes / (double)ONE_GB);
+    printf("Allocated %.2f GB of memory\n", (double)n_bytes / ONE_GB);
     return mem;
 }
 
