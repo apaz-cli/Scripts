@@ -7,6 +7,7 @@
 #include <cuda_runtime.h>
 #include <vector>
 #include <string.h>
+#include <atomic>
 
 /*******/
 /* GPU */
@@ -62,7 +63,10 @@ __global__ void gpu_torture_kernel(float **data_blocks, size_t n_blocks, size_t 
     }
 }
 
+std::atomic<bool> gpu_torture_running(false);
+
 cudaError_t launch_gpu_torture() {
+    gpu_torture_running.store(true);
     std::vector<float*> gpu_memory_blocks;
     size_t total_allocated = 0;
     
@@ -95,14 +99,28 @@ cudaError_t launch_gpu_torture() {
     dim3 block(BLOCK_SIZE);
     dim3 grid((total_elements + BLOCK_SIZE - 1) / BLOCK_SIZE);
     
-    while (1) {
+    while (gpu_torture_running.load()) {
         gpu_torture_kernel<<<grid, block>>>(d_data_blocks, n_blocks, block_size);
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
         puts("GPU torture kernel finished");
     }
     
+    // Free allocated memory
+    for (auto block : gpu_memory_blocks) {
+        cudaFree(block);
+    }
+    cudaFree(d_data_blocks);
+    
     return cudaSuccess;
+}
+
+void* gpu_torture_thread(void* arg) {
+    cudaError_t result = launch_gpu_torture();
+    if (result != cudaSuccess) {
+        fprintf(stderr, "GPU torture failed: %s\n", cudaGetErrorString(result));
+    }
+    return NULL;
 }
 
 /*******/
@@ -172,6 +190,7 @@ int main(int argc, char **argv) {
 
     alloc_mem(n_gb);
 
+    pthread_t gpu_thread;
     if (run_gpu) {
         // Initialize CUDA
         int deviceCount;
@@ -182,9 +201,9 @@ int main(int argc, char **argv) {
         }
         CUDA_CHECK(cudaSetDevice(0));
 
-        cudaError_t result = launch_gpu_torture();
-        if (result != cudaSuccess) {
-            fprintf(stderr, "GPU torture failed: %s\n", cudaGetErrorString(result));
+        // Create GPU torture thread
+        if (pthread_create(&gpu_thread, NULL, gpu_torture_thread, NULL) != 0) {
+            fprintf(stderr, "Failed to create GPU torture thread\n");
             return 1;
         }
     }
@@ -198,6 +217,12 @@ int main(int argc, char **argv) {
         while(1) {
             sleep(1);
         }
+    }
+
+    // Clean up
+    if (run_gpu) {
+        gpu_torture_running.store(false);
+        pthread_join(gpu_thread, NULL);
     }
 
     return 0;
