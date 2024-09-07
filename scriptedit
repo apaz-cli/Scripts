@@ -33,6 +33,9 @@ fi
 cd "$SCRIPTS_DIR"
 if [ ! -f "$1" ]; then
   printf "%s\n" "$SHEBANG" | awk '{gsub(/\\n/, "\n"); print}' > "$1"
+else
+  touch "$1"
 fi
+
 chmod +x "$1"
 $EDITOR "$1"
