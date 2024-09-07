@@ -1,0 +1,4 @@
+#!/bin/sh
+gromit-mpx \
+  --key F4 \
+  $@
