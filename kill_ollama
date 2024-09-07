@@ -1,0 +1,13 @@
+#!/bin/sh
+
+LOADED_MODELS="$(ollama ps | awk 'NR>1 {print $1}')"
+
+if [ "$LOADED_MODELS" = "" ]; then
+    echo "No models are currently loaded."
+    exit 0
+fi
+
+for MODEL in $LOADED_MODELS; do
+    echo "Killing model $MODEL"
+    curl http://localhost:11434/api/generate -d "{\"model\": \"$MODEL\", \"keep_alive\": 0}" >/dev/null
+done
