@@ -1,0 +1,7 @@
+#!/bin/sh
+
+# Open a website that shows you the github forks of a given github repo.
+
+# The first argument can either be blank, or the link to the github repo.
+
+xdg-open "https://techgaun.github.io/active-forks/index.html#$1"
