@@ -270,7 +270,7 @@ cli_menu() {
     fi
     
     # Read the article
-    less -Q -P "Phrack Issue $ISSUE, Article $ARTICLE" "phrack$ISSUE/$ARTICLE.txt"
+    less -P "Phrack Issue $ISSUE, Article $ARTICLE" "phrack$ISSUE/$ARTICLE.txt"
 }
 
 
