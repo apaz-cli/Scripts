@@ -1,0 +1,17 @@
+#!/bin/sh
+
+INSTALL_DIR="/tmp/pqa"
+WD="$(pwd)"
+
+if [ ! -d "$INSTALL_DIR" ]; then
+  cd /tmp/ && mkdir pqa/ && cd pqa/
+  python -m venv "$INSTALL_DIR" >/dev/null
+  bin/pip install paper-qa >/dev/null 2>/dev/null
+fi
+
+. ~/ant_key
+
+"$INSTALL_DIR/bin/pqa" \
+  --llm "anthropic/litellm-claude-3-5-sonnet-20241022" \
+  --summary_llm "anthropic/litellm-claude-3-5-sonnet-20241022" \
+  $@

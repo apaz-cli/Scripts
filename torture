@@ -8,8 +8,10 @@ TMP="$(mktemp -d)"
 # Compile with nvcc if available, otherwise cc.
 if command -v nvcc &> /dev/null
 then
+    echo "Running with nvcc."
     nvcc -o "$TMP/a.out" -x cu "$0" -O3 -lpthread && "$TMP/a.out" $@;
 else
+    echo "Running with cc."
     cc -o "$TMP/a.out" -x c "$0" -O3 -lpthread && "$TMP/a.out" $@;
 fi
 
