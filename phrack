@@ -47,9 +47,9 @@ download_all_files() {
     local file="phrack$num.tar.gz"
     local max_retries=3
     local retry_count=0
-    
+
     if [ -d "$folder" ]; then update_progress; return 0; fi
-    
+
     while [ $retry_count -lt $max_retries ]; do
         if download_file "$url" "$file"; then
             if [ -s "$file" ]; then
@@ -68,7 +68,7 @@ download_all_files() {
         retry_count=$((retry_count + 1))
         sleep $((retry_count * 2))
     done
-    
+
     echo "Failed to download $file after $max_retries attempts"
     return 1
 }
@@ -78,23 +78,23 @@ download_archive() {
     if [ ! -d "$DEST_DIR" ]; then
         mkdir -p "$DEST_DIR" 2>/dev/null
         cd "$DEST_DIR" || exit 1
-        
+
         # Download the index page and extract latest issue number.
         INDEX_URL="https://phrack.org/archives/issues/"
         INDEX_FILE="index.html"
         download_file "$INDEX_URL" "$INDEX_FILE"
         NUM_ISSUES=$(grep -oP '(?<=<A HREF=")[0-9]+(?=/">)' "$INDEX_FILE" | sort -rn | head -n1)
         rm "$INDEX_FILE"
-        
+
         # Initialize progress file and create lock file
         echo "0" > "$PROGRESS_FILE"
         touch "$PROGRESS_FILE.lock"
-        
+
         # Await all tarball downloads to complete.
         echo "Downloading archive to $DEST_DIR"
         for i in $(seq $NUM_ISSUES -1 1); do download_all_files $i & done; wait
         echo
-        
+
         # Clean up progress file and lock file
         rm "$PROGRESS_FILE" "$PROGRESS_FILE.lock"
     fi
@@ -111,12 +111,12 @@ _cursor_to() { echo -en "\033[$1;$2H" >&2; }
 _key_input() {
     local ESC=$'\033'
     local IFS=''
-    
+
     _read_stdin -rsn1 a
     if [[ "$ESC" == "$a" ]]; then
         _read_stdin -rsn2 b
     fi
-    
+
     local input="${a}${b}"
     case "$input" in
         "$ESC[A" | "k") echo up ;;
@@ -133,7 +133,7 @@ _decrement_selected() {
     local decrement=$2
     local opts_count=$3
     local row_size=10
-    
+
     if [ $decrement -eq $row_size ]; then
         # Moving up a row
         if [ $selected -lt $row_size ]; then
@@ -154,7 +154,7 @@ _decrement_selected() {
             ((selected -= decrement))
         fi
     fi
-    
+
     echo -n $selected
 }
 
@@ -163,7 +163,7 @@ _increment_selected() {
     local increment=$2
     local opts_count=$3
     local row_size=10
-    
+
     if [ $increment -eq $row_size ]; then
         # Moving down a row
         if [ $selected -ge $(( opts_count - row_size )) ]; then
@@ -179,7 +179,7 @@ _increment_selected() {
             selected=0
         fi
     fi
-    
+
     echo -n $selected
 }
 
@@ -187,18 +187,18 @@ grid_select() {
     # Clear the screen and move cursor to top-left corner
     echo -en "\033[2J\033[H" >&2
     echo -en "\033[31m?\033[0m\033[1m ${1} \033[0m\n" >&2
-    
+
     local opts=("${@:2}")
     local opts_count=$(($# -1))
-    
+
     # Set a fixed starting position for the menu (line 2)
     local startrow=2
     local lastrow=$((startrow + (opts_count + 9) / 10))
-    
+
     # ensure cursor and input echoing back on upon a ctrl+c during read -s
     trap "_cursor_blink_on; stty echo; exit" 2
     _cursor_blink_off
-    
+
     local selected=0
     while true; do
         # print options by overwriting the last lines
@@ -220,14 +220,14 @@ grid_select() {
             echo -en "\033[K" >&2
             ((line++))
         done
-        
+
         # Clear any remaining lines that were used in previous renders
         while [ $((startrow + line)) -le $lastrow ]; do
             _cursor_to $((startrow + line))
             echo -en "\033[K" >&2
             ((line++))
         done
-        
+
         # user key control
         case $(_key_input) in
             enter) break; ;;
@@ -236,17 +236,17 @@ grid_select() {
             right) selected=$(_increment_selected "${selected}" 1  "${opts_count}"); ;;
             left)  selected=$(_decrement_selected "${selected}" 1  "${opts_count}"); ;;
         esac
-        
+
         # Move cursor back to the top of the menu area
         _cursor_to $startrow
     done
-    
+
     echo -en "\n" >&2
-    
+
     # cursor position back to normal
     _cursor_to "${lastrow}"
     _cursor_blink_on
-    
+
     # Clear screen
     echo -en "\033[2J\033[H" >&2
 
@@ -258,7 +258,7 @@ grid_select() {
 cli_menu() {
     ISSUE=$1
     ARTICLE=$2
-    
+
     # If not supplied, prompt for issue and article numbers.
     if [ -z "$ISSUE" ]; then
         ISS_IDX=$(grid_select "Select an issue" $(seq 1 $NUM_ISSUES))
@@ -268,7 +268,7 @@ cli_menu() {
         ART_IDX=$(grid_select "Select an article" $(seq 1 $(ls -d phrack$ISSUE/* | wc -l)))
         ARTICLE=$((ART_IDX + 1))
     fi
-    
+
     # Read the article
     less -P "Phrack Issue $ISSUE, Article $ARTICLE" "phrack$ISSUE/$ARTICLE.txt"
 }
