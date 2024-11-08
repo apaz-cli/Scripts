@@ -1,0 +1,6 @@
+#!/bin/sh
+
+perf record -e cycles -b -- $@
+perf report -n --sort symbol_from,symbol_to \
+  -F +mispredict,srcline_from,srcline_to --stdio
+rm perf.data perf.data.old

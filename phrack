@@ -31,9 +31,9 @@ download_file() {
     local url="$1"
     local output_file="$2"
     if command -v wget >/dev/null 2>&1; then
-        wget --no-check-certificate -q "$url" -O "$output_file"
-        elif command -v curl >/dev/null 2>&1; then
-        curl -sSL --insecure "$url" -o "$output_file"
+        wget --no-check-certificate --cipher 'DEFAULT:!DH' -q "$url" -O "$output_file"
+    elif command -v curl >/dev/null 2>&1; then
+        curl -sSL --insecure --ciphers 'DEFAULT:!DH' "$url" -o "$output_file"
     else
         echo "Error: Neither wget nor curl is available. Please install one of them." >&2
         return 1
