@@ -1,4 +1,4 @@
 #!/bin/sh
 
-# View how the GPU devices connected to this machine are connected.
+# View how the GPU devices connected to this machine are networked together.
 nvidia-smi topo -m

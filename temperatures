@@ -1,5 +1,6 @@
 #!/bin/sh
 
+# For each temperature sensor registered in /sys/class/thermal, print the temperature it's currently registering.
 for i in /sys/class/thermal/thermal_zone*; do
     printf "%s %s\n" "$(cat "$i/type")" "$(cat "$i/temp")"
 done | column -s ' ' -t | sed 's/\(.\)..$/.\1°C/'
