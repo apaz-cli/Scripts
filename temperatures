@@ -1,0 +1,5 @@
+#!/bin/sh
+
+for i in /sys/class/thermal/thermal_zone*; do
+    printf "%s %s\n" "$(cat "$i/type")" "$(cat "$i/temp")"
+done | column -s ' ' -t | sed 's/\(.\)..$/.\1°C/'
