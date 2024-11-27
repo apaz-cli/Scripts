@@ -1,0 +1,15 @@
+#!/bin/sh
+
+# Document and wrap multiple nvidia-smi commands.
+
+# Print out the classic SMI view
+# nvidia-smi
+
+
+# List attached GPUs
+# This actually iterates over indexes of nvidia-smi pci -i
+# nvidia-smi --list-gpus
+
+# Print out the connectedness of the attached GPUs
+# nvidia-smi topo -m
+

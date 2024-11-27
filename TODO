@@ -2,5 +2,5 @@
 
 # Open my todo list.
 
-#xfce4-terminal --hide-scrollbar -e 'bash -c "nano ~/Documents/TODO"' -T "TODO"
+#xfce4-terminal --hide-scrollbar -e 'sh -c "nano ~/Documents/TODO"' -T "TODO"
 wnano ~/Documents/TODO

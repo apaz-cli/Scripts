@@ -1,19 +1,28 @@
-#!/bin/bash
+#!/bin/sh
 
 # Create a diff of device entries in /dev
 
+# Create temporary files
+tmp_initial="/tmp/initial_devices.$$"
+tmp_final="/tmp/final_devices.$$"
+tmp_diff="/tmp/diff_devices.$$"
+
 # Capture the list of devices in /dev/ initially
-initial_devices=$(ls /dev/)
+ls /dev/ > "$tmp_initial"
 
 # Wait for the user to press Enter
-read -p "Press Enter to check /dev again, after connecting or disconnecting your hardware..."
+printf "Press Enter to check /dev again, after connecting or disconnecting your hardware..."
+read answer
 
 # Capture the list of devices in /dev/ after the user presses Enter
-final_devices=$(ls /dev/)
+ls /dev/ > "$tmp_final"
 
 # Compare the initial and final lists and display the differences
 echo "Devices added:"
-diff <(echo "$initial_devices") <(echo "$final_devices") | grep '>' | sed 's/> //'
+diff "$tmp_initial" "$tmp_final" | grep '>' | sed 's/> //'
 
 echo "Devices removed:"
-diff <(echo "$initial_devices") <(echo "$final_devices") | grep '<' | sed 's/< //'
+diff "$tmp_initial" "$tmp_final" | grep '<' | sed 's/< //'
+
+# Clean up temporary files
+rm -f "$tmp_initial" "$tmp_final" "$tmp_diff"
