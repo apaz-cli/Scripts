@@ -1,5 +1,22 @@
 #!/bin/sh
 
+# Check to make sure perl is installed
+if ! command -v perl > /dev/null; then
+  printf "Perl is required to run this script. Would you like to apt install it? (y/N): "
+  read PRESPONSE
+  case "$PRESPONSE" in
+    [Yy]*)
+        sudo apt install perl
+        ;;
+    *)
+        echo "Operation cancelled."
+        exit 1
+        ;;
+  esac
+
+  exit 1
+fi
+
 # If not enabled, ask permission from the user to enable perf events
 PERF_LEVEL="$(cat /proc/sys/kernel/perf_event_paranoid)"
 if [ "$PERF_LEVEL" -gt 0 ]; then
