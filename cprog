@@ -57,12 +57,23 @@ int file_exists(const char *filename) {
 }
 
 int main(int argc, char *argv[]) {
-  char *temp_dir = (char*)malloc(PATH_MAX * sizeof(char));
-  char *c_file = (char*)malloc(PATH_MAX * sizeof(char));
-  char *compile_cmd = (char*)malloc(PATH_MAX * sizeof(char));
-  char *run_cmd = (char*)malloc(PATH_MAX * sizeof(char));
-  char *nano_cmd = (char*)malloc(PATH_MAX * sizeof(char));
-  char *output_file = (char*)malloc(PATH_MAX * sizeof(char));
+  // Allocate memory for temp_dir: "/tmp/cshebang." + up to 10 random chars + null terminator
+  char *temp_dir = (char*)malloc(22);
+
+  // Allocate memory for c_file: temp_dir + "/" + program name (max 255 chars) + ".c" + null terminator
+  char *c_file = (char*)malloc(strlen(temp_dir) + 260);
+
+  // Allocate memory for compile_cmd: "gcc -o " + output_file + " " + c_file + null terminator
+  char *compile_cmd = (char*)malloc(strlen(temp_dir) * 2 + 270);
+
+  // Allocate memory for run_cmd: output_file + null terminator
+  char *run_cmd = (char*)malloc(strlen(temp_dir) + 256);
+
+  // Allocate memory for nano_cmd: "nano " + c_file + null terminator
+  char *nano_cmd = (char*)malloc(strlen(c_file) + 6);
+
+  // Allocate memory for output_file: temp_dir + "/" + program name (max 255 chars) + null terminator
+  char *output_file = (char*)malloc(strlen(temp_dir) + 257);
 
   if (!temp_dir || !c_file || !compile_cmd || !run_cmd || !nano_cmd || !output_file) {
     fprintf(stderr, "Memory allocation failed\n");
@@ -91,7 +102,8 @@ int main(int argc, char *argv[]) {
   mkdir(temp_dir, 0755);
 
   // Create cinclude.h file
-  char *cinclude_file = malloc(PATH_MAX * sizeof(char));
+  // Allocate memory for cinclude_file: temp_dir + "/cinclude.h" + null terminator
+  char *cinclude_file = malloc(strlen(temp_dir) + 12);
   if (!cinclude_file) {
     fprintf(stderr, "Memory allocation failed\n");
     return 1;
