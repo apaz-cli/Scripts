@@ -57,7 +57,7 @@ int file_exists(const char *filename) {
 }
 
 int main(int argc, char *argv[]) {
-  char *temp_dir, *c_file, *cinclude_file, *output_file, *nano_cmd, *compile_cmd, *run_cmd;
+  char *temp_dir = NULL, *c_file = NULL, *cinclude_file = NULL, *output_file = NULL, *nano_cmd = NULL, *compile_cmd = NULL, *run_cmd = NULL;
 
   if (argc > 1) {
     // Use provided program name
@@ -91,7 +91,7 @@ int main(int argc, char *argv[]) {
   FILE *cinclude_fp = fopen(cinclude_file, "w");
   if (!cinclude_fp) {
     fprintf(stderr, "Failed to create cinclude.h file\n");
-    return 1;
+    goto cleanup;
   }
   fprintf(cinclude_fp, "%s", cinclude_content);
   fclose(cinclude_fp);
@@ -101,7 +101,7 @@ int main(int argc, char *argv[]) {
     FILE *fp = fopen(c_file, "w");
     if (!fp) {
       fprintf(stderr, "Failed to create C file\n");
-      return 1;
+      goto cleanup;
     }
     fprintf(fp, "%s", template_code);
     fclose(fp);
@@ -121,7 +121,7 @@ int main(int argc, char *argv[]) {
   sprintf(compile_cmd, "gcc -o %s %s", output_file, c_file);
   if (system(compile_cmd) != 0) {
     fprintf(stderr, "Compilation failed\n");
-    return 1;
+    goto cleanup;
   }
 
   // Run
@@ -129,6 +129,16 @@ int main(int argc, char *argv[]) {
   sprintf(run_cmd, "%s", output_file);
   printf("\n--- Program Output ---\n");
   system(run_cmd);
+
+cleanup:
+  // Free allocated memory
+  free(temp_dir);
+  free(c_file);
+  free(cinclude_file);
+  free(output_file);
+  free(nano_cmd);
+  free(compile_cmd);
+  free(run_cmd);
 
   return 0;
 }
