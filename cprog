@@ -74,7 +74,7 @@ int main(int argc, char *argv[]) {
       return 1;
     }
     temp_dir = (char*)malloc(100); // Assuming the temp dir name won't exceed 100 chars
-    fgets(temp_dir, 100, temp);
+    fgets(temp_dir, 100, temp); // Read output of mktemp
     temp_dir[strcspn(temp_dir, "\n")] = 0; // Remove newline
     pclose(temp);
 
@@ -117,17 +117,15 @@ int main(int argc, char *argv[]) {
   sprintf(output_file, "%s/%s", temp_dir, argc > 1 ? argv[1] : "temp");
 
   // Compile
-  compile_cmd = (char*)malloc(strlen("gcc -o ") + strlen(output_file) + strlen(c_file) + 3);
+  compile_cmd = (char*)malloc(strlen("gcc -o ") + strlen(output_file) + 1 + strlen(c_file) + 1);
   sprintf(compile_cmd, "gcc -o %s %s", output_file, c_file);
   if (system(compile_cmd) != 0) {
-    fprintf(stderr, "Compilation failed\n");
     goto cleanup;
   }
 
   // Run
   run_cmd = (char*)malloc(strlen(output_file) + 1);
   sprintf(run_cmd, "%s", output_file);
-  printf("\n--- Program Output ---\n");
   system(run_cmd);
 
 cleanup:
