@@ -24,7 +24,7 @@ exit $RVAL
 // Template C program
 const char *template_code = "#include \"cinclude.h\"\n"
                             "\n"
-                            "int main(int argc, char *argv[]) {\n"
+                            "int main(int argc, char** argv) {\n"
                             "    printf(\"Hello, World!\\n\");\n"
                             "    return 0;\n"
                             "}\n";
