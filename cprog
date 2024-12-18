@@ -76,9 +76,10 @@ int main(int argc, char *argv[]) {
     
     size_t temp_dir_size = 0;
     ssize_t temp_dir_len = getline(&temp_dir, &temp_dir_size, temp);
+    pclose(temp);
+
     if (temp_dir_len == -1) {
       fprintf(stderr, "Failed to read temporary directory name\n");
-      pclose(temp);
       goto cleanup;
     }
     
@@ -86,8 +87,6 @@ int main(int argc, char *argv[]) {
     if (temp_dir[temp_dir_len - 1] == '\n') {
       temp_dir[temp_dir_len - 1] = '\0';
     }
-    
-    pclose(temp);
 
     c_file = (char*)malloc(strlen(temp_dir) + strlen("/temp.c") + 1);
     sprintf(c_file, "%s/temp.c", temp_dir);
