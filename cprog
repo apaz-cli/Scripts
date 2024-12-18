@@ -1,3 +1,19 @@
+#if 0
+
+# Run as a bash script.
+
+# Create a temp dir to compile into and run out of.
+TMP="$(mktemp -d /tmp/cshebang.XXXXXXXXX)"
+
+cc -o "$TMP/a.out" -x c "$0" -O3 -lpthread && "$TMP/a.out" $@;
+
+RVAL=$?;
+rm -rf "$TMP";
+exit $RVAL
+
+#endif
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,8 +26,7 @@ const char *template_code = "#include <stdio.h>\n"
                             "#include <stdlib.h>\n"
                             "\n"
                             "int main(int argc, char *argv[]) {\n"
-                            "    printf(\"Hello, World!\\n\");\n"
-                            "    return 0;\n"
+                            "    \n"
                             "}\n";
 
 int file_exists(const char *filename) {
@@ -20,12 +35,12 @@ int file_exists(const char *filename) {
 }
 
 int main(int argc, char *argv[]) {
-  char *temp_dir = malloc(PATH_MAX * sizeof(char));
-  char *c_file = malloc(PATH_MAX * sizeof(char));
-  char *compile_cmd = malloc(PATH_MAX * sizeof(char));
-  char *run_cmd = malloc(PATH_MAX * sizeof(char));
-  char *nano_cmd = malloc(PATH_MAX * sizeof(char));
-  char *output_file = malloc(PATH_MAX * sizeof(char));
+  char *temp_dir = (char*)malloc(PATH_MAX * sizeof(char));
+  char *c_file = (char*)malloc(PATH_MAX * sizeof(char));
+  char *compile_cmd = (char*)malloc(PATH_MAX * sizeof(char));
+  char *run_cmd = (char*)malloc(PATH_MAX * sizeof(char));
+  char *nano_cmd = (char*)malloc(PATH_MAX * sizeof(char));
+  char *output_file = (char*)malloc(PATH_MAX * sizeof(char));
 
   if (!temp_dir || !c_file || !compile_cmd || !run_cmd || !nano_cmd || !output_file) {
     fprintf(stderr, "Memory allocation failed\n");
