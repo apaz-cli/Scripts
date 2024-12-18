@@ -58,7 +58,7 @@ int file_exists(const char *filename) {
 
 int main(int argc, char *argv[]) {
   // Allocate memory for temp_dir: "/tmp/cshebang." + up to 10 random chars + null terminator
-  char *temp_dir = (char*)malloc(22);
+  char *temp_dir = (char*)malloc(25);
 
   // Allocate memory for c_file: temp_dir + "/" + program name (max 255 chars) + ".c" + null terminator
   char *c_file = (char*)malloc(strlen(temp_dir) + 260);
@@ -103,7 +103,7 @@ int main(int argc, char *argv[]) {
 
   // Create cinclude.h file
   // Allocate memory for cinclude_file: temp_dir + "/cinclude.h" + null terminator
-  char *cinclude_file = malloc(strlen(temp_dir) + 12);
+  char *cinclude_file = (char*)malloc(strlen(temp_dir) + 12);
   if (!cinclude_file) {
     fprintf(stderr, "Memory allocation failed\n");
     return 1;
