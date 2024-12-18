@@ -57,33 +57,15 @@ int file_exists(const char *filename) {
 }
 
 int main(int argc, char *argv[]) {
-  // Allocate memory for temp_dir: "/tmp/cshebang." + up to 10 random chars + null terminator
-  char *temp_dir = (char*)malloc(25);
-
-  // Allocate memory for c_file: temp_dir + "/" + program name (max 255 chars) + ".c" + null terminator
-  char *c_file = (char*)malloc(strlen(temp_dir) + 260);
-
-  // Allocate memory for compile_cmd: "gcc -o " + output_file + " " + c_file + null terminator
-  char *compile_cmd = (char*)malloc(strlen(temp_dir) * 2 + 270);
-
-  // Allocate memory for run_cmd: output_file + null terminator
-  char *run_cmd = (char*)malloc(strlen(temp_dir) + 256);
-
-  // Allocate memory for nano_cmd: "nano " + c_file + null terminator
-  char *nano_cmd = (char*)malloc(strlen(c_file) + 6);
-
-  // Allocate memory for output_file: temp_dir + "/" + program name (max 255 chars) + null terminator
-  char *output_file = (char*)malloc(strlen(temp_dir) + 257);
-
-  if (!temp_dir || !c_file || !compile_cmd || !run_cmd || !nano_cmd || !output_file) {
-    fprintf(stderr, "Memory allocation failed\n");
-    return 1;
-  }
+  char *temp_dir, *c_file, *cinclude_file, *output_file, *nano_cmd, *compile_cmd, *run_cmd;
 
   if (argc > 1) {
     // Use provided program name
-    snprintf(temp_dir, PATH_MAX, "/tmp/cshebang.%s", argv[1]);
-    snprintf(c_file, PATH_MAX, "%s/%s.c", temp_dir, argv[1]);
+    temp_dir = malloc(strlen("/tmp/cshebang.") + strlen(argv[1]) + 1);
+    sprintf(temp_dir, "/tmp/cshebang.%s", argv[1]);
+    
+    c_file = malloc(strlen(temp_dir) + strlen(argv[1]) + 3); // +3 for "/" + ".c" + null terminator
+    sprintf(c_file, "%s/%s.c", temp_dir, argv[1]);
   } else {
     // Create temporary directory
     FILE *temp = popen("mktemp -d /tmp/cshebang.XXXXXXXXX", "r");
@@ -91,24 +73,21 @@ int main(int argc, char *argv[]) {
       fprintf(stderr, "Failed to create temporary directory\n");
       return 1;
     }
-    fgets(temp_dir, PATH_MAX, temp);
+    temp_dir = malloc(100); // Assuming the temp dir name won't exceed 100 chars
+    fgets(temp_dir, 100, temp);
     temp_dir[strcspn(temp_dir, "\n")] = 0; // Remove newline
     pclose(temp);
 
-    snprintf(c_file, PATH_MAX, "%s/temp.c", temp_dir);
+    c_file = malloc(strlen(temp_dir) + 9); // +9 for "/temp.c" + null terminator
+    sprintf(c_file, "%s/temp.c", temp_dir);
   }
 
   // Create directory if it doesn't exist
   mkdir(temp_dir, 0755);
 
   // Create cinclude.h file
-  // Allocate memory for cinclude_file: temp_dir + "/cinclude.h" + null terminator
-  char *cinclude_file = (char*)malloc(strlen(temp_dir) + 12);
-  if (!cinclude_file) {
-    fprintf(stderr, "Memory allocation failed\n");
-    return 1;
-  }
-  snprintf(cinclude_file, PATH_MAX, "%s/cinclude.h", temp_dir);
+  cinclude_file = malloc(strlen(temp_dir) + 12); // +12 for "/cinclude.h" + null terminator
+  sprintf(cinclude_file, "%s/cinclude.h", temp_dir);
   FILE *cinclude_fp = fopen(cinclude_file, "w");
   if (!cinclude_fp) {
     fprintf(stderr, "Failed to create cinclude.h file\n");
@@ -129,22 +108,25 @@ int main(int argc, char *argv[]) {
   }
 
   // Open file in nano
-  snprintf(nano_cmd, PATH_MAX, "nano %s", c_file);
+  nano_cmd = malloc(strlen("nano ") + strlen(c_file) + 1);
+  sprintf(nano_cmd, "nano %s", c_file);
   system(nano_cmd);
 
   // Get output file name
-  snprintf(output_file, PATH_MAX, "%s/%s", temp_dir,
-           argc > 1 ? argv[1] : "temp");
+  output_file = malloc(strlen(temp_dir) + (argc > 1 ? strlen(argv[1]) : strlen("temp")) + 2);
+  sprintf(output_file, "%s/%s", temp_dir, argc > 1 ? argv[1] : "temp");
 
   // Compile
-  snprintf(compile_cmd, PATH_MAX, "gcc -o %s %s", output_file, c_file);
+  compile_cmd = malloc(strlen("gcc -o ") + strlen(output_file) + strlen(c_file) + 3);
+  sprintf(compile_cmd, "gcc -o %s %s", output_file, c_file);
   if (system(compile_cmd) != 0) {
     fprintf(stderr, "Compilation failed\n");
     return 1;
   }
 
   // Run
-  snprintf(run_cmd, PATH_MAX, "%s", output_file);
+  run_cmd = malloc(strlen(output_file) + 1);
+  sprintf(run_cmd, "%s", output_file);
   printf("\n--- Program Output ---\n");
   system(run_cmd);
 
