@@ -194,13 +194,13 @@ void print_deck_summary(const Deck* deck) {
 
 // Get hand conditions from user
 void get_hand_conditions(const Deck* deck, HandCondition* condition) {
-    printf("Enter minimum count for each tag (or press Enter for no condition):\n");
+    printf("For each tag, enter min,max counts (e.g. '2,4' or just Enter for no condition):\n");
     char line[256];
     
     // Initialize all conditions to no restrictions
     for (int i = 0; i < MAX_TAGS; i++) {
         condition->min_count[i] = 0;
-        condition->max_count[i] = HAND_SIZE;  // Maximum possible in a hand
+        condition->max_count[i] = HAND_SIZE;
     }
     
     for (int i = 0; i < deck->num_tags; i++) {
@@ -218,10 +218,22 @@ void get_hand_conditions(const Deck* deck, HandCondition* condition) {
                 continue;
             }
             
-            // Parse input
-            int min_count = atoi(line);
-            condition->min_count[i] = min_count;
-            condition->max_count[i] = HAND_SIZE;  // No maximum limit
+            // Parse input for min,max
+            char* comma = strchr(line, ',');
+            if (comma) {
+                // Both min and max specified
+                *comma = '\0';
+                int min_count = atoi(line);
+                int max_count = atoi(comma + 1);
+                
+                condition->min_count[i] = min_count;
+                condition->max_count[i] = max_count;
+            } else {
+                // Only min specified, max defaults to HAND_SIZE
+                int min_count = atoi(line);
+                condition->min_count[i] = min_count;
+                condition->max_count[i] = HAND_SIZE;
+            }
         }
     }
 }
