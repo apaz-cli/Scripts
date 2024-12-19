@@ -48,6 +48,12 @@ const char *cinclude_content = "#ifndef CINCLUDE_H\n"
                                "#include <signal.h>\n"
                                "#include <stdarg.h>\n"
                                "#include <stddef.h>\n"
+                               "#include <unistd.h>\n"
+                               "#include <fcntl.h>\n"
+                               "#include <sys/types.h>\n"
+                               "#include <sys/stat.h>\n"
+                               "#include <sys/wait.h>\n"
+                               "#include <pthread.h>\n"
                                "\n"
                                "#endif // CINCLUDE_H\n";
 
