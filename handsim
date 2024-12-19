@@ -261,6 +261,58 @@ __device__ __host__ __forceinline__ bool check_hand_condition(const Card* hand, 
 }
 
 
+// GPU kernel for hand simulation
+__global__ void simulate_hands_kernel(SimulationData* sim_data, int* results, int simulations_per_thread) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    // Initialize thread-local RNG state
+    unsigned int rng_state = tid + clock64();
+    
+    // Thread-local storage
+    Card hand[HAND_SIZE];
+    int success_count = 0;
+    
+    // Shared deck for this block
+    __shared__ Card shared_deck[MAX_DECK_SIZE];
+    
+    // Copy deck to shared memory
+    if (threadIdx.x < sim_data->deck_size) {
+        shared_deck[threadIdx.x] = sim_data->deck[threadIdx.x];
+    }
+    __syncthreads();
+    
+    // Run simulations
+    #pragma unroll 4
+    for (int sim = 0; sim < simulations_per_thread; sim++) {
+        // Create a local copy of first HAND_SIZE cards for shuffling
+        Card local_deck[HAND_SIZE];
+        #pragma unroll
+        for (int i = 0; i < HAND_SIZE; i++) {
+            local_deck[i] = shared_deck[i];
+        }
+        
+        // Fast Fisher-Yates for first HAND_SIZE cards only
+        #pragma unroll
+        for (int i = 0; i < HAND_SIZE; i++) {
+            int j = (xorshift32(&rng_state) % (sim_data->deck_size - i)) + i;
+            Card temp = shared_deck[j];
+            hand[i] = temp;
+            
+            if (j < HAND_SIZE) {
+                local_deck[j] = local_deck[i];
+            }
+        }
+        
+        // Check hand condition
+        if (check_hand_condition(hand, &sim_data->condition, sim_data->num_tags)) {
+            success_count++;
+        }
+    }
+    
+    // Store results
+    results[tid] = success_count;
+}
+
 // CPU version of the simulation
 void simulate_hands_cpu(Deck* deck, HandCondition* condition, int num_simulations, int* total_success) {
     Card hand[HAND_SIZE];
