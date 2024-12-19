@@ -260,61 +260,6 @@ __device__ __host__ __forceinline__ bool check_hand_condition(const Card* hand, 
     return true;
 }
 
-// Fisher-Yates shuffle for GPU
-__device__ void shuffle_deck(Card* deck, int size, unsigned int *rng_state) {
-    for (int i = size - 1; i > 0; i--) {
-        int j = xorshift32(rng_state) % (i + 1);
-        Card temp = deck[i];
-        deck[i] = deck[j];
-        deck[j] = temp;
-    }
-}
-
-// Optimized CUDA kernel using shared memory
-__global__ void simulate_hands_kernel(SimulationData* sim_data, int* results, int simulations_per_thread) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int rng_state = tid + clock64();
-    
-    __shared__ Card shared_deck[MAX_DECK_SIZE];
-    
-    // Cooperatively load deck into shared memory
-    for (int i = threadIdx.x; i < sim_data->deck_size; i += blockDim.x) {
-        shared_deck[i] = sim_data->deck[i];
-    }
-    __syncthreads();
-    
-    Card hand[HAND_SIZE];
-    int local_success = 0;
-    
-    // Run simulations
-    #pragma unroll 4
-    for (int sim = 0; sim < simulations_per_thread; sim++) {
-        // Create a local copy of first HAND_SIZE cards for shuffling
-        Card local_deck[HAND_SIZE];
-        #pragma unroll
-        for (int i = 0; i < HAND_SIZE; i++) {
-            local_deck[i] = shared_deck[i];
-        }
-        
-        // Fast Fisher-Yates for first HAND_SIZE cards only
-        #pragma unroll
-        for (int i = 0; i < HAND_SIZE; i++) {
-            int j = (xorshift32(&rng_state) % (sim_data->deck_size - i)) + i;
-            Card temp = shared_deck[j];
-            hand[i] = temp;
-            
-            if (j < HAND_SIZE) {
-                local_deck[j] = local_deck[i];
-            }
-        }
-        
-        if (check_hand_condition(hand, &sim_data->condition, sim_data->num_tags)) {
-            local_success++;
-        }
-    }
-    
-    results[tid] = local_success;
-}
 
 // CPU version of the simulation
 void simulate_hands_cpu(Deck* deck, HandCondition* condition, int num_simulations, int* total_success) {
