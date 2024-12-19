@@ -276,6 +276,10 @@ __device__ __host__ __forceinline__ bool check_hand_condition(const Card* hand, 
 // GPU kernel for hand simulation
 __global__ void simulate_hands_kernel(SimulationData* sim_data, int* results, int simulations_per_thread) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int total_threads = gridDim.x * blockDim.x;
+    
+    // Skip if this thread isn't needed
+    if (tid >= total_threads) return;
     
     // Initialize thread-local RNG state
     unsigned int rng_state = tid + clock64();
@@ -380,6 +384,11 @@ int main(int argc, char* argv[]) {
         int simulations_per_thread = (num_simulations + (num_blocks * THREADS_PER_BLOCK) - 1) / 
                                    (num_blocks * THREADS_PER_BLOCK);
 
+        // Calculate actual simulations per thread to match total exactly
+        int total_threads = num_blocks * THREADS_PER_BLOCK;
+        simulations_per_thread = num_simulations / total_threads;
+        int extra_sims = num_simulations % total_threads;
+        
         // Pack simulation data
         SimulationData sim_data;
         memcpy(sim_data.deck, deck.cards, sizeof(Card) * deck.size);
@@ -391,13 +400,14 @@ int main(int argc, char* argv[]) {
         SimulationData* d_sim_data;
         int* d_results;
         cudaMalloc(&d_sim_data, sizeof(SimulationData));
-        cudaMalloc(&d_results, sizeof(int) * num_blocks * THREADS_PER_BLOCK);
+        cudaMalloc(&d_results, sizeof(int) * total_threads);
 
         // Copy data to device
         cudaMemcpy(d_sim_data, &sim_data, sizeof(SimulationData), cudaMemcpyHostToDevice);
 
         // Launch kernel
-        simulate_hands_kernel<<<num_blocks, THREADS_PER_BLOCK>>>(d_sim_data, d_results, simulations_per_thread);
+        simulate_hands_kernel<<<num_blocks, THREADS_PER_BLOCK>>>(
+            d_sim_data, d_results, simulations_per_thread + (extra_sims > 0 ? 1 : 0));
 
         // Allocate and copy results back to host
         int* h_results = (int*)malloc(sizeof(int) * num_blocks * THREADS_PER_BLOCK);
