@@ -370,8 +370,7 @@ int main(int argc, char* argv[]) {
         }
 
         // Clean up
-        cudaFree(d_deck);
-        cudaFree(d_condition);
+        cudaFree(d_sim_data);
         cudaFree(d_results);
         free(h_results);
 
