@@ -25,6 +25,7 @@ exit $RVAL
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <ctype.h>
 #include <time.h>
 #include <cuda_runtime.h>
@@ -214,7 +215,7 @@ __device__ unsigned int xorshift32(unsigned int *state) {
 }
 
 // Fast tag counting for GPU
-__device__ __forceinline__ bool check_hand_condition(const Card* hand, const HandCondition* condition, int num_tags) {
+__device__ __host__ __forceinline__ bool check_hand_condition(const Card* hand, const HandCondition* condition, int num_tags) {
     uint32_t tag_counts[MAX_TAGS] = {0};
     
     #pragma unroll
