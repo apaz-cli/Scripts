@@ -297,9 +297,9 @@ __global__ void simulate_hands_kernel(SimulationData* sim_data, int* results, in
     #pragma unroll 4
     for (int sim = 0; sim < simulations_per_thread; sim++) {
         // Create a local copy of first HAND_SIZE cards for shuffling
-        Card local_deck[HAND_SIZE];
+        Card local_deck[MAX_DECK_SIZE];
         #pragma unroll
-        for (int i = 0; i < HAND_SIZE; i++) {
+        for (int i = 0; i < MAX_DECK_SIZE; i++) {
             local_deck[i] = shared_deck[i];
         }
         
