@@ -289,13 +289,23 @@ __global__ void simulate_hands_kernel(SimulationData* sim_data, int* results, in
     // Run simulations
     #pragma unroll 4
     for (int sim = 0; sim < simulations_per_thread; sim++) {
+        // Create a local copy of first HAND_SIZE cards for shuffling
+        Card local_deck[HAND_SIZE];
+        #pragma unroll
+        for (int i = 0; i < HAND_SIZE; i++) {
+            local_deck[i] = shared_deck[i];
+        }
+        
         // Fast Fisher-Yates for first HAND_SIZE cards only
         #pragma unroll
         for (int i = 0; i < HAND_SIZE; i++) {
             int j = (xorshift32(&rng_state) % (sim_data->deck_size - i)) + i;
-            hand[i] = shared_deck[j];
-            shared_deck[j] = shared_deck[i];
-            shared_deck[i] = hand[i];
+            Card temp = shared_deck[j];
+            hand[i] = temp;
+            
+            if (j < HAND_SIZE) {
+                local_deck[j] = local_deck[i];
+            }
         }
         
         if (check_hand_condition(hand, &sim_data->condition, sim_data->num_tags)) {
