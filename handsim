@@ -39,8 +39,7 @@ exit $RVAL
 #define NUM_SIMULATIONS_PER_THREAD 1000
 
 typedef struct {
-    char name[MAX_CARD_NAME];
-    bool tags[MAX_TAGS];
+    uint32_t tags;  // Bitfield for up to 32 tags
 } Card;
 
 typedef struct {
@@ -52,9 +51,17 @@ typedef struct {
 } Deck;
 
 typedef struct {
-    int min_count[MAX_TAGS];
-    int max_count[MAX_TAGS];
+    uint8_t min_count[MAX_TAGS];
+    uint8_t max_count[MAX_TAGS];
 } HandCondition;
+
+// Packed structure for GPU simulation
+typedef struct {
+    Card deck[MAX_DECK_SIZE];
+    int deck_size;
+    int num_tags; 
+    HandCondition condition;
+} SimulationData;
 
 // Trim whitespace from a string
 void trim(char* str) {
@@ -155,8 +162,7 @@ bool parse_deck(const char* filename, Deck* deck) {
         // Add cards to deck
         for (int i = 0; i < count && deck->size < MAX_DECK_SIZE; i++) {
             Card* card = &deck->cards[deck->size];
-            strcpy(card->name, card_name);
-            memset(card->tags, 0, sizeof(card->tags));
+            card->tags = 0;
             
             // Parse tags
             ptr = name_end;
@@ -164,7 +170,7 @@ bool parse_deck(const char* filename, Deck* deck) {
             while (parse_tag(&ptr, tag)) {
                 int tag_index = get_tag_index(deck, tag);
                 if (tag_index >= 0) {
-                    card->tags[tag_index] = true;
+                    card->tags |= (1u << tag_index);
                     deck->tag_counts[tag_index]++;
                 }
             }
@@ -207,20 +213,20 @@ __device__ unsigned int xorshift32(unsigned int *state) {
     return x;
 }
 
-// Check if a hand meets the conditions
-__device__ __host__ bool check_hand_condition(const Card* hand, const HandCondition* condition, int num_tags) {
-    int tag_counts[MAX_TAGS] = {0};
+// Fast tag counting for GPU
+__device__ __forceinline__ bool check_hand_condition(const Card* hand, const HandCondition* condition, int num_tags) {
+    uint32_t tag_counts[MAX_TAGS] = {0};
     
-    // Count tags in hand
+    #pragma unroll
     for (int i = 0; i < HAND_SIZE; i++) {
+        uint32_t tags = hand[i].tags;
+        #pragma unroll
         for (int t = 0; t < num_tags; t++) {
-            if (hand[i].tags[t]) {
-                tag_counts[t]++;
-            }
+            tag_counts[t] += (tags >> t) & 1u;
         }
     }
     
-    // Check conditions
+    #pragma unroll
     for (int t = 0; t < num_tags; t++) {
         if (tag_counts[t] < condition->min_count[t] || 
             tag_counts[t] > condition->max_count[t]) {
@@ -241,37 +247,39 @@ __device__ void shuffle_deck(Card* deck, int size, unsigned int *rng_state) {
     }
 }
 
-// CUDA kernel for hand simulation
-__global__ void simulate_hands_kernel(Card* deck, int deck_size, HandCondition* condition, 
-                                    int num_tags, int* results, int simulations_per_thread) {
+// Optimized CUDA kernel using shared memory
+__global__ void simulate_hands_kernel(SimulationData* sim_data, int* results, int simulations_per_thread) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int rng_state = tid + clock64(); // Initialize RNG state
-
-    Card local_deck[MAX_DECK_SIZE];
+    unsigned int rng_state = tid + clock64();
+    
+    __shared__ Card shared_deck[MAX_DECK_SIZE];
+    
+    // Cooperatively load deck into shared memory
+    for (int i = threadIdx.x; i < sim_data->deck_size; i += blockDim.x) {
+        shared_deck[i] = sim_data->deck[i];
+    }
+    __syncthreads();
+    
     Card hand[HAND_SIZE];
     int local_success = 0;
-
-    // Copy deck to local memory
-    for (int i = 0; i < deck_size; i++) {
-        local_deck[i] = deck[i];
-    }
-
-    // Run simulations for this thread
+    
+    // Run simulations
+    #pragma unroll 4
     for (int sim = 0; sim < simulations_per_thread; sim++) {
-        // Shuffle deck
-        shuffle_deck(local_deck, deck_size, &rng_state);
-
-        // Draw hand
+        // Fast Fisher-Yates for first HAND_SIZE cards only
+        #pragma unroll
         for (int i = 0; i < HAND_SIZE; i++) {
-            hand[i] = local_deck[i];
+            int j = (xorshift32(&rng_state) % (sim_data->deck_size - i)) + i;
+            hand[i] = shared_deck[j];
+            shared_deck[j] = shared_deck[i];
+            shared_deck[i] = hand[i];
         }
-
-        // Check condition
-        if (check_hand_condition(hand, condition, num_tags)) {
+        
+        if (check_hand_condition(hand, &sim_data->condition, sim_data->num_tags)) {
             local_success++;
         }
     }
-
+    
     results[tid] = local_success;
 }
 
@@ -330,20 +338,24 @@ int main(int argc, char* argv[]) {
         int simulations_per_thread = (num_simulations + (num_blocks * THREADS_PER_BLOCK) - 1) / 
                                    (num_blocks * THREADS_PER_BLOCK);
 
+        // Pack simulation data
+        SimulationData sim_data;
+        memcpy(sim_data.deck, deck.cards, sizeof(Card) * deck.size);
+        sim_data.deck_size = deck.size;
+        sim_data.num_tags = deck.num_tags;
+        memcpy(&sim_data.condition, &condition, sizeof(HandCondition));
+
         // Allocate device memory
-        Card* d_deck;
-        HandCondition* d_condition;
+        SimulationData* d_sim_data;
         int* d_results;
-        cudaMalloc(&d_deck, sizeof(Card) * deck.size);
-        cudaMalloc(&d_condition, sizeof(HandCondition));
+        cudaMalloc(&d_sim_data, sizeof(SimulationData));
         cudaMalloc(&d_results, sizeof(int) * num_blocks * THREADS_PER_BLOCK);
 
         // Copy data to device
-        cudaMemcpy(d_deck, deck.cards, sizeof(Card) * deck.size, cudaMemcpyHostToDevice);
-        cudaMemcpy(d_condition, &condition, sizeof(HandCondition), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_sim_data, &sim_data, sizeof(SimulationData), cudaMemcpyHostToDevice);
 
         // Launch kernel
-        simulate_hands_kernel<<<num_blocks, THREADS_PER_BLOCK>>>(d_deck, deck.size, d_condition, deck.num_tags, d_results, simulations_per_thread);
+        simulate_hands_kernel<<<num_blocks, THREADS_PER_BLOCK>>>(d_sim_data, d_results, simulations_per_thread);
 
         // Allocate and copy results back to host
         int* h_results = (int*)malloc(sizeof(int) * num_blocks * THREADS_PER_BLOCK);
