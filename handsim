@@ -1,0 +1,386 @@
+#if 0
+
+# Run as a bash script.
+
+# Create a temp dir to compile into and run out of.
+TMP="$(mktemp -d)"
+
+# Compile with nvcc if available, otherwise cc.
+if command -v nvcc &> /dev/null
+then
+    echo "Running with nvcc."
+    nvcc -o "$TMP/a.out" -x cu "$0" -O3 -lpthread && "$TMP/a.out" $@;
+else
+    echo "Running with cc."
+    cc -o "$TMP/a.out" -x c "$0" -O3 -lpthread && "$TMP/a.out" $@;
+fi
+
+RVAL=$?;
+rm -rf "$TMP";
+exit $RVAL
+
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+#include <ctype.h>
+#include <time.h>
+#include <cuda_runtime.h>
+
+#define MAX_LINE_LENGTH 256
+#define MAX_TAGS 32
+#define MAX_TAG_LENGTH 32
+#define MAX_CARD_NAME 128
+#define MAX_DECK_SIZE 100
+#define HAND_SIZE 7
+#define THREADS_PER_BLOCK 256
+#define NUM_SIMULATIONS_PER_THREAD 1000
+
+typedef struct {
+    char name[MAX_CARD_NAME];
+    bool tags[MAX_TAGS];
+} Card;
+
+typedef struct {
+    Card cards[MAX_DECK_SIZE];
+    int size;
+    int num_tags;
+    char tag_names[MAX_TAGS][MAX_TAG_LENGTH];
+    int tag_counts[MAX_TAGS];
+} Deck;
+
+typedef struct {
+    int min_count[MAX_TAGS];
+    int max_count[MAX_TAGS];
+} HandCondition;
+
+// Trim whitespace from a string
+void trim(char* str) {
+    char* start = str;
+    char* end = str + strlen(str) - 1;
+    
+    while(isspace(*start)) start++;
+    while(end > start && isspace(*end)) end--;
+    
+    int len = end - start + 1;
+    memmove(str, start, len);
+    str[len] = '\0';
+}
+
+// Parse a single tag from the line and advance the pointer
+bool parse_tag(char** ptr, char* tag) {
+    char* start = strchr(*ptr, '[');
+    if (!start) return false;
+    
+    char* end = strchr(start, ']');
+    if (!end) return false;
+    
+    int len = end - start - 1;
+    strncpy(tag, start + 1, len);
+    tag[len] = '\0';
+    *ptr = end + 1;
+    return true;
+}
+
+// Get or add tag index
+int get_tag_index(Deck* deck, const char* tag) {
+    for (int i = 0; i < deck->num_tags; i++) {
+        if (strcmp(deck->tag_names[i], tag) == 0) {
+            return i;
+        }
+    }
+    
+    if (deck->num_tags < MAX_TAGS) {
+        strcpy(deck->tag_names[deck->num_tags], tag);
+        return deck->num_tags++;
+    }
+    
+    return -1;
+}
+
+// Parse deck from file
+bool parse_deck(const char* filename, Deck* deck) {
+    FILE* file = fopen(filename, "r");
+    if (!file) {
+        printf("Error: Cannot open file %s\n", filename);
+        return false;
+    }
+    
+    deck->size = 0;
+    deck->num_tags = 0;
+    memset(deck->tag_counts, 0, sizeof(deck->tag_counts));
+    bool in_sideboard = false;
+    char line[MAX_LINE_LENGTH];
+    
+    while (fgets(line, sizeof(line), file)) {
+        trim(line);
+        
+        // Skip empty lines
+        if (strlen(line) == 0) continue;
+        
+        // Check for section markers
+        if (strstr(line, "Sideboard:") != NULL) {
+            in_sideboard = true;
+            continue;
+        }
+        
+        // Skip comments and section markers
+        if (line[0] == '#' || line[strlen(line)-1] == ':') continue;
+        
+        // Skip sideboard cards
+        if (in_sideboard) continue;
+        
+        // Parse card entry
+        char* ptr = line;
+        int count = 1;
+        
+        // Parse count if present
+        if (isdigit(*ptr)) {
+            count = atoi(ptr);
+            while (isdigit(*ptr)) ptr++;
+            while (isspace(*ptr)) ptr++;
+        }
+        
+        // Parse card name
+        char card_name[MAX_CARD_NAME];
+        char* name_end = ptr;
+        while (*name_end && *name_end != '[') name_end++;
+        int name_len = name_end - ptr;
+        strncpy(card_name, ptr, name_len);
+        card_name[name_len] = '\0';
+        trim(card_name);
+        
+        // Add cards to deck
+        for (int i = 0; i < count && deck->size < MAX_DECK_SIZE; i++) {
+            Card* card = &deck->cards[deck->size];
+            strcpy(card->name, card_name);
+            memset(card->tags, 0, sizeof(card->tags));
+            
+            // Parse tags
+            ptr = name_end;
+            char tag[MAX_TAG_LENGTH];
+            while (parse_tag(&ptr, tag)) {
+                int tag_index = get_tag_index(deck, tag);
+                if (tag_index >= 0) {
+                    card->tags[tag_index] = true;
+                    deck->tag_counts[tag_index]++;
+                }
+            }
+            
+            deck->size++;
+        }
+    }
+    
+    fclose(file);
+    return true;
+}
+
+// Print deck summary
+void print_deck_summary(const Deck* deck) {
+    printf("\nDeck Summary:\n");
+    printf("Total cards: %d\n\n", deck->size);
+    printf("Tag distribution:\n");
+    for (int i = 0; i < deck->num_tags; i++) {
+        printf("%s: %d cards\n", deck->tag_names[i], deck->tag_counts[i]);
+    }
+    printf("\n");
+}
+
+// Get hand conditions from user
+void get_hand_conditions(const Deck* deck, HandCondition* condition) {
+    printf("Enter hand conditions for each tag (min max):\n");
+    for (int i = 0; i < deck->num_tags; i++) {
+        printf("%s: ", deck->tag_names[i]);
+        scanf("%d %d", &condition->min_count[i], &condition->max_count[i]);
+    }
+}
+
+// Random number generator for GPU
+__device__ unsigned int xorshift32(unsigned int *state) {
+    unsigned int x = *state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *state = x;
+    return x;
+}
+
+// Check if a hand meets the conditions
+__device__ __host__ bool check_hand_condition(const Card* hand, const HandCondition* condition, int num_tags) {
+    int tag_counts[MAX_TAGS] = {0};
+    
+    // Count tags in hand
+    for (int i = 0; i < HAND_SIZE; i++) {
+        for (int t = 0; t < num_tags; t++) {
+            if (hand[i].tags[t]) {
+                tag_counts[t]++;
+            }
+        }
+    }
+    
+    // Check conditions
+    for (int t = 0; t < num_tags; t++) {
+        if (tag_counts[t] < condition->min_count[t] || 
+            tag_counts[t] > condition->max_count[t]) {
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+// Fisher-Yates shuffle for GPU
+__device__ void shuffle_deck(Card* deck, int size, unsigned int *rng_state) {
+    for (int i = size - 1; i > 0; i--) {
+        int j = xorshift32(rng_state) % (i + 1);
+        Card temp = deck[i];
+        deck[i] = deck[j];
+        deck[j] = temp;
+    }
+}
+
+// CUDA kernel for hand simulation
+__global__ void simulate_hands_kernel(Card* deck, int deck_size, HandCondition* condition, 
+                                    int num_tags, int* results, int simulations_per_thread) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int rng_state = tid + clock64(); // Initialize RNG state
+
+    Card local_deck[MAX_DECK_SIZE];
+    Card hand[HAND_SIZE];
+    int local_success = 0;
+
+    // Copy deck to local memory
+    for (int i = 0; i < deck_size; i++) {
+        local_deck[i] = deck[i];
+    }
+
+    // Run simulations for this thread
+    for (int sim = 0; sim < simulations_per_thread; sim++) {
+        // Shuffle deck
+        shuffle_deck(local_deck, deck_size, &rng_state);
+
+        // Draw hand
+        for (int i = 0; i < HAND_SIZE; i++) {
+            hand[i] = local_deck[i];
+        }
+
+        // Check condition
+        if (check_hand_condition(hand, condition, num_tags)) {
+            local_success++;
+        }
+    }
+
+    results[tid] = local_success;
+}
+
+// CPU version of the simulation
+void simulate_hands_cpu(Deck* deck, HandCondition* condition, int num_simulations, int* total_success) {
+    Card hand[HAND_SIZE];
+    *total_success = 0;
+
+    for (int sim = 0; sim < num_simulations; sim++) {
+        // Fisher-Yates shuffle
+        for (int i = deck->size - 1; i > 0; i--) {
+            int j = rand() % (i + 1);
+            Card temp = deck->cards[i];
+            deck->cards[i] = deck->cards[j];
+            deck->cards[j] = temp;
+        }
+
+        // Draw hand
+        for (int i = 0; i < HAND_SIZE; i++) {
+            hand[i] = deck->cards[i];
+        }
+
+        // Check condition
+        if (check_hand_condition(hand, condition, deck->num_tags)) {
+            (*total_success)++;
+        }
+    }
+}
+
+int main(int argc, char* argv[]) {
+    if (argc < 2) {
+        printf("Usage: %s <deck_file> [gpu/cpu] [num_simulations]\n", argv[0]);
+        return 1;
+    }
+    
+    bool use_gpu = (argc > 2 && strcmp(argv[2], "gpu") == 0);
+    int num_simulations = (argc > 3) ? atoi(argv[3]) : 1000000;
+    
+    // Parse deck
+    Deck deck;
+    if (!parse_deck(argv[1], &deck)) {
+        return 1;
+    }
+    
+    print_deck_summary(&deck);
+    
+    // Get conditions from user
+    HandCondition condition;
+    get_hand_conditions(&deck, &condition);
+    
+    clock_t start = clock();
+    
+    if (use_gpu) {
+        // GPU Implementation
+        int num_blocks = (num_simulations + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+        int simulations_per_thread = (num_simulations + (num_blocks * THREADS_PER_BLOCK) - 1) / 
+                                   (num_blocks * THREADS_PER_BLOCK);
+
+        // Allocate device memory
+        Card* d_deck;
+        HandCondition* d_condition;
+        int* d_results;
+        cudaMalloc(&d_deck, sizeof(Card) * deck.size);
+        cudaMalloc(&d_condition, sizeof(HandCondition));
+        cudaMalloc(&d_results, sizeof(int) * num_blocks * THREADS_PER_BLOCK);
+
+        // Copy data to device
+        cudaMemcpy(d_deck, deck.cards, sizeof(Card) * deck.size, cudaMemcpyHostToDevice);
+        cudaMemcpy(d_condition, &condition, sizeof(HandCondition), cudaMemcpyHostToDevice);
+
+        // Launch kernel
+        simulate_hands_kernel<<<num_blocks, THREADS_PER_BLOCK>>>(d_deck, deck.size, d_condition, deck.num_tags, d_results, simulations_per_thread);
+
+        // Allocate and copy results back to host
+        int* h_results = (int*)malloc(sizeof(int) * num_blocks * THREADS_PER_BLOCK);
+        cudaMemcpy(h_results, d_results, sizeof(int) * num_blocks * THREADS_PER_BLOCK, 
+                   cudaMemcpyDeviceToHost);
+
+        // Sum up results
+        int total_success = 0;
+        for (int i = 0; i < num_blocks * THREADS_PER_BLOCK; i++) {
+            total_success += h_results[i];
+        }
+
+        // Clean up
+        cudaFree(d_deck);
+        cudaFree(d_condition);
+        cudaFree(d_results);
+        free(h_results);
+
+        // Print results
+        double probability = (double)total_success / num_simulations;
+        printf("GPU Results:\n");
+        printf("Successful hands: %d/%d (%.2f%%)\n", 
+               total_success, num_simulations, probability * 100);
+    } else {
+        // CPU Implementation
+        int total_success = 0;
+        simulate_hands_cpu(&deck, &condition, num_simulations, &total_success);
+
+        double probability = (double)total_success / num_simulations;
+        printf("CPU Results:\n");
+        printf("Successful hands: %d/%d (%.2f%%)\n", 
+               total_success, num_simulations, probability * 100);
+    }
+
+    clock_t end = clock();
+    double time_spent = (double)(end - start) / CLOCKS_PER_SEC;
+    printf("Time taken: %.2f seconds\n", time_spent);
+
+    return 0;
+}
