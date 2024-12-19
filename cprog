@@ -58,13 +58,14 @@ int file_exists(const char *filename) {
 
 int main(int argc, char *argv[]) {
   char *temp_dir = NULL, *c_file = NULL, *cinclude_file = NULL, *output_file = NULL, *nano_cmd = NULL, *compile_cmd = NULL, *run_cmd = NULL;
+  FILE *cinclude_fp = NULL;
 
   if (argc > 1) {
     // Use provided program name
     temp_dir = (char*)malloc(strlen("/tmp/cshebang.") + strlen(argv[1]) + 1);
     sprintf(temp_dir, "/tmp/cshebang.%s", argv[1]);
     
-    c_file = (char*)malloc(strlen(temp_dir) + strlen(argv[1]) + 4); // +3 for "/" + ".c" + null terminator
+    c_file = (char*)malloc(strlen(temp_dir) + 1 + strlen(argv[1]) + 2 + 1);
     sprintf(c_file, "%s/%s.c", temp_dir, argv[1]);
   } else {
     // Create temporary directory
@@ -94,11 +95,10 @@ int main(int argc, char *argv[]) {
 
   // Create directory if it doesn't exist
   mkdir(temp_dir, 0755);
-
   // Create cinclude.h file
   cinclude_file = (char*)malloc(strlen(temp_dir) + strlen("/cinclude.h") + 1);
   sprintf(cinclude_file, "%s/cinclude.h", temp_dir);
-  FILE *cinclude_fp = fopen(cinclude_file, "w");
+  cinclude_fp = fopen(cinclude_file, "w");
   if (!cinclude_fp) {
     fprintf(stderr, "Failed to create cinclude.h file\n");
     goto cleanup;
@@ -123,7 +123,7 @@ int main(int argc, char *argv[]) {
   system(nano_cmd);
 
   // Get output file name
-  output_file = (char*)malloc(strlen(temp_dir) + (argc > 1 ? strlen(argv[1]) : strlen("temp")) + 2);
+  output_file = (char*)malloc(strlen(temp_dir) + 1 + (argc > 1 ? strlen(argv[1]) : strlen("temp")) + 1);
   sprintf(output_file, "%s/%s", temp_dir, argc > 1 ? argv[1] : "temp");
 
   // Compile
