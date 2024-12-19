@@ -186,12 +186,9 @@ bool parse_deck(const char* filename, Deck* deck) {
 
 // Print deck summary
 void print_deck_summary(const Deck* deck) {
-    printf("\nDeck Summary:\n");
-    printf("Total cards: %d\n\n", deck->size);
-    printf("Tag distribution:\n");
-    for (int i = 0; i < deck->num_tags; i++) {
+    printf("\nDeck Summary:\nTotal cards: %d\n\nTags:\n", deck->size);
+    for (int i = 0; i < deck->num_tags; i++)
         printf("%s: %d cards\n", deck->tag_names[i], deck->tag_counts[i]);
-    }
     printf("\n");
 }
 
@@ -200,7 +197,10 @@ void get_hand_conditions(const Deck* deck, HandCondition* condition) {
     printf("Enter hand conditions for each tag (min max):\n");
     for (int i = 0; i < deck->num_tags; i++) {
         printf("%s: ", deck->tag_names[i]);
-        scanf("%d %d", &condition->min_count[i], &condition->max_count[i]);
+        int min_count, max_count;
+        scanf("%d %d", &min_count, &max_count);
+        condition->min_count[i] = min_count;
+        condition->max_count[i] = max_count;
     }
 }
 
