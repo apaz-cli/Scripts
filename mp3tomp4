@@ -1,0 +1,51 @@
+#!/bin/sh
+
+# Check for required arguments
+if [ "$#" -lt 3 ]; then
+    echo "Usage: $0 <input_audio.mp3> <input_image.[jpg|png]> <output.mp4>"
+    exit 1
+fi
+
+# Assign arguments to variables
+AUDIO_FILE="$1"
+IMAGE_FILE="$2"
+OUTPUT_FILE="$3"
+
+# Check if files exist
+if [ ! -f "$AUDIO_FILE" ]; then
+    echo "Error: Audio file '$AUDIO_FILE' not found"
+    exit 1
+fi
+
+if [ ! -f "$IMAGE_FILE" ]; then
+    echo "Error: Image file '$IMAGE_FILE' not found"
+    exit 1
+fi
+
+# Check if ffmpeg is installed
+if ! command -v ffmpeg > /dev/null 2>&1; then
+    echo "Error: ffmpeg is not installed"
+    exit 1
+fi
+
+# Get audio duration
+DURATION=$(ffprobe -i "$AUDIO_FILE" -show_entries format=duration -v quiet -of csv="p=0")
+
+# Create video
+ffmpeg -loop 1 -i "$IMAGE_FILE" \
+       -i "$AUDIO_FILE" \
+       -c:v libx264 \
+       -tune stillimage \
+       -c:a aac \
+       -b:a 192k \
+       -shortest \
+       -pix_fmt yuv420p \
+       -t "$DURATION" \
+       "$OUTPUT_FILE"
+
+if [ $? -eq 0 ]; then
+    echo "Successfully created $OUTPUT_FILE"
+else
+    echo "Error: Failed to create video"
+    exit 1
+fi
