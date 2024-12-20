@@ -28,7 +28,6 @@ exit $RVAL
 #include <time.h>
 
 #ifdef __CUDACC__
-#include <cuda_runtime.h>
 #define CUDA_CALLABLE __host__ __device__
 #else
 #define CUDA_CALLABLE
@@ -55,9 +54,10 @@ CUDA_CALLABLE unsigned int xorshift32(rng_state *state) {
 #define MAX_TAGS 8
 #define MAX_TAG_LEN 32
 #define HAND_SIZE 7
-#define NUM_SIMULATIONS (1000 * 1000)
+#define NUM_SIMULATIONS (10 * 1000 * 1000)
 #define THREADS_PER_BLOCK 32
 #define NUM_BLOCKS 46
+#define NUM_PTHREADS 8
 #define TOTAL_THREADS (THREADS_PER_BLOCK * NUM_BLOCKS)
 
 // Structure to represent a single card
@@ -333,6 +333,7 @@ int main(int argc, char **argv) {
   cudaMemcpy(d_cond, &cond, sizeof(Conditions), cudaMemcpyHostToDevice);
 
   int sims_per_thread = NUM_SIMULATIONS / TOTAL_THREADS;
+  printf("Sims per thread: %d\n", sims_per_thread);
   simulate_kernel<<<NUM_BLOCKS, THREADS_PER_BLOCK>>>(d_deck, d_cond, d_results,
                                       sims_per_thread, base_seed);
 
@@ -351,12 +352,12 @@ int main(int argc, char **argv) {
 
 #else
   // CPU Implementation
-  pthread_t threads[NUM_THREADS];
-  ThreadData thread_data[NUM_THREADS];
-  int results[NUM_THREADS];
+  pthread_t threads[NUM_PTHREADS];
+  ThreadData thread_data[NUM_PTHREADS];
+  int results[NUM_PTHREADS];
 
-  int sims_per_thread = NUM_SIMULATIONS / NUM_THREADS;
-  for (int i = 0; i < NUM_THREADS; i++) {
+  int sims_per_thread = NUM_SIMULATIONS / NUM_PTHREADS;
+  for (int i = 0; i < NUM_PTHREADS; i++) {
     thread_data[i].deck = deck;
     thread_data[i].cond = &cond;
     thread_data[i].result = &results[i];
@@ -366,7 +367,7 @@ int main(int argc, char **argv) {
   }
 
   int total_successes = 0;
-  for (int i = 0; i < NUM_THREADS; i++) {
+  for (int i = 0; i < NUM_PTHREADS; i++) {
     pthread_join(threads[i], NULL);
     total_successes += results[i];
   }
