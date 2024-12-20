@@ -35,6 +35,18 @@ exit $RVAL
 #define cudaFree(ptr) free(ptr)
 #endif
 
+CUDA_CALLABLE
+int str_compare(const char* str1, const char* str2) {
+    while (*str1 && *str2) {
+        if (*str1 != *str2) {
+            return *str1 - *str2;
+        }
+        str1++;
+        str2++;
+    }
+    return *str1 - *str2;
+}
+
 #define MAX_CARDS 100
 #define MAX_TAGS 10
 #define MAX_TAG_LEN 32
@@ -91,7 +103,7 @@ int check_hand(int* hand, int hand_size, Deck* deck, TagConstraints* constraints
         Card* card = &deck->cards[hand[i]];
         for (int j = 0; j < card->num_tags; j++) {
             for (int k = 0; k < deck->num_tags; k++) {
-                if (strcmp(card->tags[j], deck->all_tags[k]) == 0) {
+                if (str_compare(card->tags[j], deck->all_tags[k]) == 0) {
                     tag_counts[k]++;
                 }
             }
