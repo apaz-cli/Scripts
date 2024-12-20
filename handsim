@@ -107,8 +107,35 @@ int check_hand(int* hand, int hand_size, Deck* deck, TagConstraints* constraints
     return 1;
 }
 
-CUDA_CALLABLE
-void simulate_hands(SimParams* params) {
+#ifdef __CUDACC__
+__global__ void cuda_simulate_hands(SimParams params) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int total_threads = gridDim.x * blockDim.x;
+    
+    // Skip if this thread isn't needed
+    if (tid >= total_threads) return;
+    
+    int* deck_indices = (int*)malloc(params.deck->total_cards * sizeof(int));
+    for (int i = 0; i < params.deck->total_cards; i++) {
+        deck_indices[i] = i;
+    }
+    
+    unsigned int local_seed = params.seed + tid;
+    int local_success = 0;
+    
+    for (int trial = 0; trial < params.num_trials; trial++) {
+        shuffle_array(deck_indices, params.deck->total_cards, &local_seed);
+        if (check_hand(deck_indices, HAND_SIZE, params.deck, params.constraints)) {
+            local_success++;
+        }
+    }
+    
+    atomicAdd(params.success_count, local_success);
+    free(deck_indices);
+}
+#endif
+
+void simulate_hands_cpu(SimParams* params) {
     int* deck_indices = (int*)malloc(params->deck->total_cards * sizeof(int));
     for (int i = 0; i < params->deck->total_cards; i++) {
         deck_indices[i] = i;
@@ -124,18 +151,13 @@ void simulate_hands(SimParams* params) {
         }
     }
     
-    #ifdef __CUDACC__
-    atomicAdd(params->success_count, local_success);
-    #else
     *params->success_count += local_success;
-    #endif
-    
     free(deck_indices);
 }
 
 void* cpu_thread_func(void* arg) {
     SimParams* params = (SimParams*)arg;
-    simulate_hands(params);
+    simulate_hands_cpu(params);
     return NULL;
 }
 
@@ -263,19 +285,14 @@ int main(int argc, char** argv) {
     int* d_success_count;
     cudaMalloc(&d_success_count, sizeof(int));
     cudaMemset(d_success_count, 0, sizeof(int));
-    
-    SimParams* d_params;
-    cudaMalloc(&d_params, sizeof(SimParams));
     params.success_count = d_success_count;
-    cudaMemcpy(d_params, &params, sizeof(SimParams), cudaMemcpyHostToDevice);
     
     int num_blocks = 256;
     int threads_per_block = 256;
-    simulate_hands<<<num_blocks, threads_per_block>>>(d_params);
+    cuda_simulate_hands<<<num_blocks, threads_per_block>>>(params);
     
     cudaMemcpy(&success_count, d_success_count, sizeof(int), cudaMemcpyDeviceToHost);
     cudaFree(d_success_count);
-    cudaFree(d_params);
     #else
     // CPU implementation with pthreads
     pthread_t threads[CPU_THREADS];
