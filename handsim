@@ -56,7 +56,9 @@ CUDA_CALLABLE unsigned int xorshift32(rng_state *state) {
 #define MAX_TAG_LEN 32
 #define HAND_SIZE 7
 #define NUM_SIMULATIONS (1000 * 1000)
-#define NUM_THREADS 20
+#define THREADS_PER_BLOCK 32
+#define NUM_BLOCKS 46
+#define TOTAL_THREADS (THREADS_PER_BLOCK * NUM_BLOCKS)
 
 // Structure to represent a single card
 typedef struct {
@@ -325,21 +327,21 @@ int main(int argc, char **argv) {
 
   cudaMalloc(&d_deck, sizeof(Deck));
   cudaMalloc(&d_cond, sizeof(Conditions));
-  cudaMalloc(&d_results, NUM_THREADS * sizeof(int));
+  cudaMalloc(&d_results, TOTAL_THREADS * sizeof(int));
 
   cudaMemcpy(d_deck, deck, sizeof(Deck), cudaMemcpyHostToDevice);
   cudaMemcpy(d_cond, &cond, sizeof(Conditions), cudaMemcpyHostToDevice);
 
-  int sims_per_thread = NUM_SIMULATIONS / NUM_THREADS;
-  simulate_kernel<<<1, NUM_THREADS>>>(d_deck, d_cond, d_results,
+  int sims_per_thread = NUM_SIMULATIONS / TOTAL_THREADS;
+  simulate_kernel<<<NUM_BLOCKS, THREADS_PER_BLOCK>>>(d_deck, d_cond, d_results,
                                       sims_per_thread, base_seed);
 
-  int results[NUM_THREADS];
-  cudaMemcpy(results, d_results, NUM_THREADS * sizeof(int),
+  int results[TOTAL_THREADS];
+  cudaMemcpy(results, d_results, TOTAL_THREADS * sizeof(int),
              cudaMemcpyDeviceToHost);
 
   int total_successes = 0;
-  for (int i = 0; i < NUM_THREADS; i++) {
+  for (int i = 0; i < TOTAL_THREADS; i++) {
     total_successes += results[i];
   }
 
