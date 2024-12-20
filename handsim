@@ -125,7 +125,7 @@ CUDA_CALLABLE int simulate_hands(Deck* deck, Conditions* cond,
         }
         
         // Shuffle
-        shuffle(local_deck, deck->num_cards, seed);
+        shuffle(local_deck, deck->num_cards, rng);
         
         // Draw hand
         for (int i = 0; i < HAND_SIZE; i++) {
