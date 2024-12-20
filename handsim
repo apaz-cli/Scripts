@@ -278,10 +278,38 @@ int main(int argc, char** argv) {
     parse_deck(argv[1], &deck);
     
     TagConstraints constraints;
-    printf("\nEnter constraints for each tag (min max):\n");
+    printf("\nEnter constraints for each tag (single number or min,max):\n");
     for (int i = 0; i < deck.num_tags; i++) {
         printf("%s: ", deck.all_tags[i]);
-        scanf("%d %d", &constraints.min_count[i], &constraints.max_count[i]);
+        char input[32];
+        if (fgets(input, sizeof(input), stdin) == NULL) {
+            fprintf(stderr, "Error reading input\n");
+            return 1;
+        }
+        
+        // Handle first newline from previous scanf if this is the first tag
+        if (i == 0) {
+            if (fgets(input, sizeof(input), stdin) == NULL) {
+                fprintf(stderr, "Error reading input\n");
+                return 1;
+            }
+        }
+
+        // Parse input for either single number or min,max pair
+        int min = 0, max = deck.total_cards;
+        char *comma = strchr(input, ',');
+        if (comma) {
+            // Min,max format
+            *comma = '\0';
+            min = atoi(input);
+            max = atoi(comma + 1);
+        } else {
+            // Single number format (exact match)
+            min = max = atoi(input);
+        }
+        
+        constraints.min_count[i] = min;
+        constraints.max_count[i] = max;
     }
     
     int success_count = 0;
