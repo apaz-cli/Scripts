@@ -3,9 +3,17 @@
 # Run as a bash script.
 
 # Create a temp dir to compile into and run out of.
-TMP="$(mktemp -d /tmp/cshebang.XXXXXXXXX)"
+TMP="$(mktemp -d)"
 
-cc -o "$TMP/a.out" -x c "$0" -O3 -lpthread -fsanitize=undefined -fsanitize=address && "$TMP/a.out" $@;
+# Compile with nvcc if available, otherwise cc.
+if command -v nvcc &> /dev/null
+then
+    echo "Running with nvcc."
+    nvcc -o "$TMP/a.out" -x cu "$0" -O3 -lpthread && "$TMP/a.out" $@;
+else
+    echo "Running with cc."
+    cc -o "$TMP/a.out" -x c "$0" -O3 -lpthread && "$TMP/a.out" $@;
+fi
 
 RVAL=$?;
 rm -rf "$TMP";
@@ -26,7 +34,7 @@ const char *template_code = "#include \"cinclude.h\"\n"
                             "\n"
                             "int main(int argc, char** argv) {\n"
                             "    puts(\"Hello, World!\");\n"
-                            "    return 0;\n"
+                            "    \n"
                             "}\n";
 
 // Content for cinclude.h
@@ -139,10 +147,8 @@ int main(int argc, char *argv[]) {
     goto cleanup;
   }
 
-  // Run
-  run_cmd = (char*)malloc(strlen(output_file) + 1);
-  sprintf(run_cmd, "%s", output_file);
-  system(run_cmd);
+  // Run the program
+  system(output_file);
 
 cleanup:
   // Free allocated memory
@@ -152,7 +158,6 @@ cleanup:
   free(output_file);
   free(nano_cmd);
   free(compile_cmd);
-  free(run_cmd);
 
   return 0;
 }
