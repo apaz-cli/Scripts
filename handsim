@@ -55,7 +55,7 @@ CUDA_CALLABLE unsigned int xorshift32(rng_state *state) {
 #define MAX_TAGS 8
 #define MAX_TAG_LEN 32
 #define HAND_SIZE 7
-#define NUM_SIMULATIONS (100 * 1000 * 1000)
+#define NUM_SIMULATIONS (1000 * 1000)
 #define NUM_THREADS 20
 
 // Structure to represent a single card
@@ -303,6 +303,7 @@ int main(int argc, char **argv) {
   memset(&cond, 0, sizeof(cond));
 
   printf("\nEnter conditions for each tag:\n");
+  /*
   for (int i = 0; i < deck->num_tags; i++) {
     printf("%s:\n", deck->tag_names[i]);
     printf("  Minimum: ");
@@ -310,6 +311,11 @@ int main(int argc, char **argv) {
     printf("  Maximum: ");
     scanf("%d", &cond.max_counts[i]);
   }
+  */
+  cond.min_counts[0] = 2;
+  cond.min_counts[1] = 0;
+  cond.max_counts[0] = 4;
+  cond.max_counts[1] = 7;
 
 #ifdef __CUDACC__
   // GPU Implementation
@@ -371,7 +377,7 @@ int main(int argc, char **argv) {
   printf("\nResults:\n");
   printf("Time elapsed: %.2f seconds\n", elapsed);
   printf("Total simulations: %d\n", NUM_SIMULATIONS);
-  printf("Successful hands: %d\n", total_successes);
+  printf("Successful hands: %d\n\n", total_successes);
   printf("Probability: %.2f%%\n", probability * 100);
 
   free(deck);
