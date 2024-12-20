@@ -29,11 +29,27 @@ exit $RVAL
 
 #ifdef __CUDACC__
 #include <cuda_runtime.h>
-#include <curand_kernel.h>
+#define CUDA_CALLABLE __host__ __device__
 #else
+#define CUDA_CALLABLE
 #define __host__
 #define __device__
 #endif
+
+// Xorshift RNG state
+typedef struct {
+    unsigned int x;
+} rng_state;
+
+// Xorshift RNG
+CUDA_CALLABLE unsigned int xorshift32(rng_state* state) {
+    unsigned int x = state->x;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    state->x = x;
+    return x;
+}
 
 #define MAX_CARDS 100
 #define MAX_TAGS 10
@@ -63,13 +79,9 @@ typedef struct {
 } Conditions;
 
 // Fisher-Yates shuffle
-__host__ __device__ void shuffle(Card* array, int n, unsigned int* seed) {
+CUDA_CALLABLE void shuffle(Card* array, int n, rng_state* rng) {
     for (int i = n - 1; i > 0; i--) {
-        #ifdef __CUDACC__
-            int j = curand(seed) % (i + 1);
-        #else
-            int j = rand_r(seed) % (i + 1);
-        #endif
+        int j = xorshift32(rng) % (i + 1);
         Card temp = array[i];
         array[i] = array[j];
         array[j] = temp;
@@ -100,8 +112,8 @@ __host__ __device__ int check_hand(Card* hand, int hand_size, Conditions* cond, 
 }
 
 // Main simulation function - works on both CPU and GPU
-__host__ __device__ int simulate_hands(Deck* deck, Conditions* cond, 
-                                     int num_sims, unsigned int* seed) {
+CUDA_CALLABLE int simulate_hands(Deck* deck, Conditions* cond, 
+                               int num_sims, rng_state* rng) {
     int successes = 0;
     Card local_deck[MAX_CARDS];
     Card hand[HAND_SIZE];
@@ -130,9 +142,10 @@ __host__ __device__ int simulate_hands(Deck* deck, Conditions* cond,
 #ifdef __CUDACC__
 // CUDA kernel wrapper
 __global__ void simulate_kernel(Deck* d_deck, Conditions* d_cond, 
-                              int* d_results, int sims_per_thread) {
-    unsigned int seed = clock64();
-    int result = simulate_hands(d_deck, d_cond, sims_per_thread, &seed);
+                              int* d_results, int sims_per_thread, unsigned int base_seed) {
+    rng_state rng;
+    rng.x = base_seed + threadIdx.x;  // Different seed for each thread
+    int result = simulate_hands(d_deck, d_cond, sims_per_thread, &rng);
     d_results[threadIdx.x + blockIdx.x * blockDim.x] = result;
 }
 #endif
@@ -143,14 +156,18 @@ typedef struct {
     Conditions* cond;
     int* result;
     int sims_per_thread;
+    unsigned int base_seed;
 } ThreadData;
 
 // CPU thread function
 void* thread_func(void* arg) {
     ThreadData* data = (ThreadData*)arg;
-    unsigned int seed = (unsigned int)time(NULL);
+    rng_state rng;
+    unsigned int thread_seed;
+    rand_r(&data->base_seed);  // Use base_seed to generate unique thread seed
+    rng.x = data->base_seed + (unsigned int)pthread_self();
     *data->result = simulate_hands(data->deck, data->cond, 
-                                 data->sims_per_thread, &seed);
+                                 data->sims_per_thread, &rng);
     return NULL;
 }
 
@@ -260,8 +277,8 @@ void print_deck_summary(Deck* deck) {
 }
 
 int main(int argc, char** argv) {
-    if (argc != 2) {
-        printf("Usage: %s <deck_file>\n", argv[0]);
+    if (argc != 3) {
+        printf("Usage: %s <deck_file> <seed>\n", argv[0]);
         return 1;
     }
     
@@ -297,7 +314,8 @@ int main(int argc, char** argv) {
     cudaMemcpy(d_cond, &cond, sizeof(Conditions), cudaMemcpyHostToDevice);
     
     int sims_per_thread = NUM_SIMULATIONS / NUM_THREADS;
-    simulate_kernel<<<1, NUM_THREADS>>>(d_deck, d_cond, d_results, sims_per_thread);
+    unsigned int base_seed = atoi(argv[2]);
+    simulate_kernel<<<1, NUM_THREADS>>>(d_deck, d_cond, d_results, sims_per_thread, base_seed);
     
     int results[NUM_THREADS];
     cudaMemcpy(results, d_results, NUM_THREADS * sizeof(int), cudaMemcpyDeviceToHost);
@@ -318,11 +336,13 @@ int main(int argc, char** argv) {
     int results[NUM_THREADS];
     
     int sims_per_thread = NUM_SIMULATIONS / NUM_THREADS;
+    unsigned int base_seed = atoi(argv[2]);
     for (int i = 0; i < NUM_THREADS; i++) {
         thread_data[i].deck = deck;
         thread_data[i].cond = &cond;
         thread_data[i].result = &results[i];
         thread_data[i].sims_per_thread = sims_per_thread;
+        thread_data[i].base_seed = base_seed + i;
         pthread_create(&threads[i], NULL, thread_func, &thread_data[i]);
     }
     
