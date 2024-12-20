@@ -1,46 +1,52 @@
 #!/bin/bash
 
-set -e
-
 DEST_DIR="/tmp/phrack"
 PROGRESS_FILE="/tmp/phrack/download_progress"
 
-acquire_lock() {
+_acquire_lock() {
     local lockfile="$1"
     local fd=200
     eval "exec $fd>\"$lockfile\""
     flock -x $fd
 }
 
-release_lock() {
+_release_lock() {
     local fd=200
     flock -u $fd
 }
 
-update_progress() {
-    acquire_lock "$PROGRESS_FILE.lock"
+_update_progress() {
+    _acquire_lock "$PROGRESS_FILE.lock"
     local current_progress
     current_progress=$(cat "$PROGRESS_FILE")
     current_progress=$((current_progress + 1))
     echo "$current_progress" > "$PROGRESS_FILE"
     printf "\rProgress: [%-50s] %d/%d" "$(printf '#%.0s' $(seq 1 $((current_progress * 50 / NUM_ISSUES))))" "$current_progress" "$NUM_ISSUES"
-    release_lock
+    _release_lock
 }
 
-download_file() {
+_download_file() {
     local url="$1"
     local output_file="$2"
+    local retcode=0
     if command -v wget >/dev/null 2>&1; then
-        wget --no-check-certificate --cipher 'DEFAULT:!DH' -q "$url" -O "$output_file"
+        wget -q "$url" -O "$output_file"
+        retcode=$?
     elif command -v curl >/dev/null 2>&1; then
-        curl -sSL --insecure --ciphers 'DEFAULT:!DH' "$url" -o "$output_file"
+        curl -sSL "$url" -o "$output_file"
+        retcode=$?
     else
         echo "Error: Neither wget nor curl is available. Please install one of them." >&2
-        return 1
+        exit 1
+    fi
+
+    if [ $retcode -ne 0 ]; then
+        echo "Failed to download $url" >&2
+        exit 1
     fi
 }
 
-download_all_files() {
+_download_all_files() {
     local num=$(printf "%d" "$1")
     local folder="phrack$num"
     local url="https://phrack.org/archives/tgz/phrack$num.tar.gz"
@@ -48,15 +54,15 @@ download_all_files() {
     local max_retries=3
     local retry_count=0
 
-    if [ -d "$folder" ]; then update_progress; return 0; fi
+    if [ -d "$folder" ]; then _update_progress; return 0; fi
 
     while [ $retry_count -lt $max_retries ]; do
-        if download_file "$url" "$file"; then
+        if _download_file "$url" "$file"; then
             if [ -s "$file" ]; then
                 mkdir -p "$folder"
                 tar -xzf "$file" -C "$folder"
                 rm "$file"
-                update_progress
+                _update_progress
                 return 0
             else
                 echo "Downloaded $file is empty, retrying..."
@@ -73,7 +79,7 @@ download_all_files() {
     return 1
 }
 
-download_archive() {
+_download_archive() {
     # If not already downloaded, download all Phrack issues.
     if [ ! -d "$DEST_DIR" ]; then
         mkdir -p "$DEST_DIR" 2>/dev/null
@@ -82,8 +88,8 @@ download_archive() {
         # Download the index page and extract latest issue number.
         INDEX_URL="https://phrack.org/archives/issues/"
         INDEX_FILE="index.html"
-        download_file "$INDEX_URL" "$INDEX_FILE"
-        NUM_ISSUES=$(grep -oP '(?<=<A HREF=")[0-9]+(?=/">)' "$INDEX_FILE" | sort -rn | head -n1)
+        _download_file "$INDEX_URL" "$INDEX_FILE"
+        NUM_ISSUES=$(grep -oP '(?<=/issues/)[0-9]+(?=/)' "$INDEX_FILE" | sort -rn | head -n1)
         rm "$INDEX_FILE"
 
         # Initialize progress file and create lock file
@@ -91,8 +97,8 @@ download_archive() {
         touch "$PROGRESS_FILE.lock"
 
         # Await all tarball downloads to complete.
-        echo "Downloading archive to $DEST_DIR"
-        for i in $(seq $NUM_ISSUES -1 1); do download_all_files $i & done; wait
+        echo "Downloading $NUM_ISSUES issues to $DEST_DIR"
+        for i in $(seq $NUM_ISSUES -1 1); do _download_all_files $i & done; wait
         echo
 
         # Clean up progress file and lock file
@@ -183,7 +189,7 @@ _increment_selected() {
     echo -n $selected
 }
 
-grid_select() {
+_grid_select() {
     # Clear the screen and move cursor to top-left corner
     echo -en "\033[2J\033[H" >&2
     echo -en "\033[31m?\033[0m\033[1m ${1} \033[0m\n" >&2
@@ -255,17 +261,17 @@ grid_select() {
 }
 
 # Print out a menu of all issues and articles.
-cli_menu() {
+_cli_menu() {
     ISSUE=$1
     ARTICLE=$2
 
     # If not supplied, prompt for issue and article numbers.
     if [ -z "$ISSUE" ]; then
-        ISS_IDX=$(grid_select "Select an issue" $(seq 1 $NUM_ISSUES))
+        ISS_IDX=$(_grid_select "Select an issue" $(seq 1 $NUM_ISSUES))
         ISSUE=$((ISS_IDX + 1))
     fi
     if [ -z "$ARTICLE" ]; then
-        ART_IDX=$(grid_select "Select an article" $(seq 1 $(ls -d phrack$ISSUE/* | wc -l)))
+        ART_IDX=$(_grid_select "Select an article" $(seq 1 $(ls -d phrack$ISSUE/* | wc -l)))
         ARTICLE=$((ART_IDX + 1))
     fi
 
@@ -273,6 +279,48 @@ cli_menu() {
     less -P "Phrack Issue $ISSUE, Article $ARTICLE" "phrack$ISSUE/$ARTICLE.txt"
 }
 
+_ooeeoo() {
+    echo
+    echo "                          __                "
+    echo "      ...==========...   |==|               "
+    echo "      || phrack     ||   |= |               "
+    echo "   _  ||   magazine || - |^*|               "
+    echo "  |=| o=,===,==,===,=o   |__|  ,o.          "
+    echo "  |_|        (       )        / 9 \\         "
+    echo "         [========] (')         ^           "
+    echo "                                            "
+    echo " Open secrets, anyone can find me           "
+    echo " Hear your exploits running through my mind "
+    echo
+}
+
+
+_love_lain() {
+    echo
+    echo "          _..--¯¯¯¯--.._"
+    echo "      ,-''              \\\`-."
+    echo "    ,'                     \\\`."
+    echo "   ,                         \\"
+    echo "  /    LETS ALL LOVE PHRACK   \\"
+    echo " /          ..                 \\"
+    echo "'          /  ││                ;"
+    echo ";       n /│  │/         │      │"
+    echo "│      / v    /\/\`-'v√\'.│\     ,"
+    echo ":    /v\`,———.       .————.^.\  /;"
+    echo "'   │  /'@@\`,        ,@@ \`\│ \/ ;"
+    echo "│  n│  '.@@/         \@@  /│ /\ │;"
+    echo "\` │ \`    ¯¯¯          ¯¯¯  │/ /\│"
+    echo " \ \ \            \\       .│ / /"
+    echo " '; \`-\          \`'       /│/ │′"
+    echo "  \`    \       -___-      /│  │"
+    echo "   \`    \`.              .' │  /"
+    echo "    v,_   \`;._     _.-;    │ /"
+    echo "       \`'\`\│-_\`'-''__/^'^' │,"
+    echo "              ¯¯¯¯¯        "
+    echo
+    echo " No matter where you go, everyone's connected."
+    echo
+}
 
 # Parse command line arguments
 for arg in "$@"; do
@@ -280,6 +328,14 @@ for arg in "$@"; do
         -h|--help)
             echo "Usage: phrack [ISSUE] [ARTICLE]"
             echo "  Read Phrack on the command line."
+            exit 0
+        ;;
+        -m|--miku|-ooeeoo)
+            _ooeeoo
+            exit 0
+        ;;
+        -m|--lain|--love_lain)
+            _love_lain
             exit 0
         ;;
         [0-9]*)
@@ -292,5 +348,5 @@ for arg in "$@"; do
     esac
 done
 
-download_archive
-cli_menu $ISSUE $ARTICLE
+_download_archive
+_cli_menu $ISSUE $ARTICLE
