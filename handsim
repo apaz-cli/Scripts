@@ -1,11 +1,11 @@
 #if 0
 
-# Run as a bash script.
+#Run as a bash script.
 
-# Create a temp dir to compile into and run out of.
+#Create a temp dir to compile into and run out of.
 TMP="$(mktemp -d)"
 
-# Compile with nvcc if available, otherwise cc.
+#Compile with nvcc if available, otherwise cc.
 if command -v nvcc &> /dev/null
 then
     echo "Running with nvcc."
@@ -21,10 +21,10 @@ exit $RVAL
 
 #endif
 
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
 #include <time.h>
 
 #ifdef __CUDACC__
@@ -38,329 +38,335 @@ exit $RVAL
 
 // Xorshift RNG state
 typedef struct {
-    unsigned int x;
+  unsigned int x;
 } rng_state;
 
 // Xorshift RNG
-CUDA_CALLABLE unsigned int xorshift32(rng_state* state) {
-    unsigned int x = state->x;
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-    state->x = x;
-    return x;
+CUDA_CALLABLE unsigned int xorshift32(rng_state *state) {
+  unsigned int x = state->x;
+  x ^= x << 13;
+  x ^= x >> 17;
+  x ^= x << 5;
+  state->x = x;
+  return x;
 }
 
 #define MAX_CARDS 100
-#define MAX_TAGS 10
+#define MAX_TAGS 8
 #define MAX_TAG_LEN 32
 #define HAND_SIZE 7
-#define NUM_SIMULATIONS 10000
+#define NUM_SIMULATIONS (100 * 1000 * 1000)
 #define NUM_THREADS 20
 
 // Structure to represent a single card
 typedef struct {
-    char name[64];
-    int tags[MAX_TAGS];  // Bitmap of which tags are present
+  char name[64];
+  int tags[MAX_TAGS]; // Bitmap of which tags are present
 } Card;
 
 // Structure to represent a deck
 typedef struct {
-    Card cards[MAX_CARDS];
-    int num_cards;
-    int num_tags;
-    char tag_names[MAX_TAGS][MAX_TAG_LEN];
+  Card cards[MAX_CARDS];
+  int num_cards;
+  int num_tags;
+  char tag_names[MAX_TAGS][MAX_TAG_LEN];
 } Deck;
 
 // Structure for condition checking
 typedef struct {
-    int min_counts[MAX_TAGS];
-    int max_counts[MAX_TAGS];
+  int min_counts[MAX_TAGS];
+  int max_counts[MAX_TAGS];
 } Conditions;
 
 // Fisher-Yates shuffle
-CUDA_CALLABLE void shuffle(Card* array, int n, rng_state* rng) {
-    for (int i = n - 1; i > 0; i--) {
-        int j = xorshift32(rng) % (i + 1);
-        Card temp = array[i];
-        array[i] = array[j];
-        array[j] = temp;
-    }
+CUDA_CALLABLE void shuffle(Card *array, int n, rng_state *rng) {
+  for (int i = n - 1; i > 0; i--) {
+    int j = xorshift32(rng) % (i + 1);
+    Card temp = array[i];
+    array[i] = array[j];
+    array[j] = temp;
+  }
 }
 
 // Check if a hand meets the conditions
-__host__ __device__ int check_hand(Card* hand, int hand_size, Conditions* cond, int num_tags) {
-    int tag_counts[MAX_TAGS] = {0};
-    
-    // Count occurrences of each tag
-    for (int i = 0; i < hand_size; i++) {
-        for (int j = 0; j < num_tags; j++) {
-            if (hand[i].tags[j]) {
-                tag_counts[j]++;
-            }
-        }
+__host__ __device__ int check_hand(Card *hand, int hand_size, Conditions *cond,
+                                   int num_tags) {
+  int tag_counts[MAX_TAGS] = {0};
+
+  // Count occurrences of each tag
+  for (int i = 0; i < hand_size; i++) {
+    for (int j = 0; j < num_tags; j++) {
+      if (hand[i].tags[j]) {
+        tag_counts[j]++;
+      }
     }
-    
-    // Check against conditions
-    for (int i = 0; i < num_tags; i++) {
-        if (tag_counts[i] < cond->min_counts[i] || 
-            tag_counts[i] > cond->max_counts[i]) {
-            return 0;
-        }
+  }
+
+  // Check against conditions
+  for (int i = 0; i < num_tags; i++) {
+    if (tag_counts[i] < cond->min_counts[i] ||
+        tag_counts[i] > cond->max_counts[i]) {
+      return 0;
     }
-    return 1;
+  }
+  return 1;
 }
 
 // Main simulation function - works on both CPU and GPU
-CUDA_CALLABLE int simulate_hands(Deck* deck, Conditions* cond, 
-                               int num_sims, rng_state* rng) {
-    int successes = 0;
-    Card local_deck[MAX_CARDS];
-    Card hand[HAND_SIZE];
-    
-    for (int sim = 0; sim < num_sims; sim++) {
-        // Copy deck for this simulation
-        for (int i = 0; i < deck->num_cards; i++) {
-            local_deck[i] = deck->cards[i];
-        }
-        
-        // Shuffle
-        shuffle(local_deck, deck->num_cards, rng);
-        
-        // Draw hand
-        for (int i = 0; i < HAND_SIZE; i++) {
-            hand[i] = local_deck[i];
-        }
-        
-        // Check conditions
-        successes += check_hand(hand, HAND_SIZE, cond, deck->num_tags);
+CUDA_CALLABLE int simulate_hands(Deck *deck, Conditions *cond, int num_sims,
+                                 rng_state *rng) {
+  int successes = 0;
+  Card local_deck[MAX_CARDS];
+  Card hand[HAND_SIZE];
+
+  for (int sim = 0; sim < num_sims; sim++) {
+    // Copy deck for this simulation
+    for (int i = 0; i < deck->num_cards; i++) {
+      local_deck[i] = deck->cards[i];
     }
-    
-    return successes;
+
+    // Shuffle
+    shuffle(local_deck, deck->num_cards, rng);
+
+    // Draw hand
+    for (int i = 0; i < HAND_SIZE; i++) {
+      hand[i] = local_deck[i];
+    }
+
+    // Check conditions
+    successes += check_hand(hand, HAND_SIZE, cond, deck->num_tags);
+  }
+
+  return successes;
 }
 
 #ifdef __CUDACC__
 // CUDA kernel wrapper
-__global__ void simulate_kernel(Deck* d_deck, Conditions* d_cond, 
-                              int* d_results, int sims_per_thread, unsigned int base_seed) {
-    rng_state rng;
-    rng.x = base_seed + threadIdx.x;  // Different seed for each thread
-    int result = simulate_hands(d_deck, d_cond, sims_per_thread, &rng);
-    d_results[threadIdx.x + blockIdx.x * blockDim.x] = result;
+__global__ void simulate_kernel(Deck *d_deck, Conditions *d_cond,
+                                int *d_results, int sims_per_thread,
+                                unsigned int base_seed) {
+  rng_state rng;
+  rng.x = base_seed + threadIdx.x; // Different seed for each thread
+  int result = simulate_hands(d_deck, d_cond, sims_per_thread, &rng);
+  d_results[threadIdx.x + blockIdx.x * blockDim.x] = result;
 }
 #endif
 
 // CPU thread data structure
 typedef struct {
-    Deck* deck;
-    Conditions* cond;
-    int* result;
-    int sims_per_thread;
-    unsigned int base_seed;
+  Deck *deck;
+  Conditions *cond;
+  int *result;
+  int sims_per_thread;
+  unsigned int base_seed;
 } ThreadData;
 
 // CPU thread function
-void* thread_func(void* arg) {
-    ThreadData* data = (ThreadData*)arg;
-    rng_state rng;
-    rand_r(&data->base_seed);  // Use base_seed to generate unique thread seed
-    rng.x = data->base_seed + (unsigned int)pthread_self();
-    *data->result = simulate_hands(data->deck, data->cond, 
-                                 data->sims_per_thread, &rng);
-    return NULL;
+void *thread_func(void *arg) {
+  ThreadData *data = (ThreadData *)arg;
+  rng_state rng;
+  rand_r(&data->base_seed); // Use base_seed to generate unique thread seed
+  rng.x = data->base_seed + (unsigned int)pthread_self();
+  *data->result =
+      simulate_hands(data->deck, data->cond, data->sims_per_thread, &rng);
+  return NULL;
 }
 
 // Parse a deck file
-Deck* parse_deck_file(const char* filename) {
-    FILE* file = fopen(filename, "r");
-    if (!file) {
-        printf("Error opening file: %s\n", filename);
-        return NULL;
+Deck *parse_deck_file(const char *filename) {
+  FILE *file = fopen(filename, "r");
+  if (!file) {
+    printf("Error opening file: %s\n", filename);
+    return NULL;
+  }
+
+  Deck *deck = (Deck *)malloc(sizeof(Deck));
+  memset(deck, 0, sizeof(Deck));
+
+  char line[256];
+  int in_sideboard = 0;
+
+  while (fgets(line, sizeof(line), file)) {
+    // Skip comments and section markers
+    if (line[0] == '#' || strstr(line, ":")) {
+      if (strstr(line, "Sideboard:")) {
+        in_sideboard = 1;
+      }
+      continue;
     }
-    
-    Deck* deck = (Deck*)malloc(sizeof(Deck));
-    memset(deck, 0, sizeof(Deck));
-    
-    char line[256];
-    int in_sideboard = 0;
-    
-    while (fgets(line, sizeof(line), file)) {
-        // Skip comments and section markers
-        if (line[0] == '#' || strstr(line, ":")) {
-            if (strstr(line, "Sideboard:")) {
-                in_sideboard = 1;
-            }
-            continue;
-        }
-        if (in_sideboard) continue;
-        
-        // Parse line
-        char* token = strtok(line, " \t\n");
-        if (!token) continue;
-        
-        // Get count
-        int count = 1;
-        if (atoi(token) > 0) {
-            count = atoi(token);
-            token = strtok(NULL, " \t\n");
-        }
-        
-        // Get card name and tags
-        char name[64] = "";
-        while (token && token[0] != '[') {
-            strcat(name, token);
-            strcat(name, " ");
-            token = strtok(NULL, " \t\n");
-        }
-        name[strlen(name)-1] = '\0';  // Remove trailing space
-        
-        // Process tags
-        int tags[MAX_TAGS] = {0};
-        while (token && token[0] == '[') {
-            // Remove brackets
-            token[strlen(token)-1] = '\0';
-            token++;
-            
-            // Find or add tag
-            int tag_idx = -1;
-            for (int i = 0; i < deck->num_tags; i++) {
-                if (strcmp(deck->tag_names[i], token) == 0) {
-                    tag_idx = i;
-                    break;
-                }
-            }
-            if (tag_idx == -1) {
-                if (deck->num_tags >= MAX_TAGS) {
-                    printf("Too many tags!\n");
-                    continue;
-                }
-                tag_idx = deck->num_tags;
-                strcpy(deck->tag_names[deck->num_tags], token);
-                deck->num_tags++;
-            }
-            tags[tag_idx] = 1;
-            
-            token = strtok(NULL, " \t\n");
-        }
-        
-        // Add cards to deck
-        for (int i = 0; i < count; i++) {
-            if (deck->num_cards >= MAX_CARDS) {
-                printf("Too many cards!\n");
-                break;
-            }
-            strcpy(deck->cards[deck->num_cards].name, name);
-            memcpy(deck->cards[deck->num_cards].tags, tags, sizeof(tags));
-            deck->num_cards++;
-        }
+    if (in_sideboard)
+      continue;
+
+    // Parse line
+    char *token = strtok(line, " \t\n");
+    if (!token)
+      continue;
+
+    // Get count
+    int count = 1;
+    if (atoi(token) > 0) {
+      count = atoi(token);
+      token = strtok(NULL, " \t\n");
     }
-    
-    fclose(file);
-    return deck;
+
+    // Get card name and tags
+    char name[64] = "";
+    while (token && token[0] != '[') {
+      strcat(name, token);
+      strcat(name, " ");
+      token = strtok(NULL, " \t\n");
+    }
+    name[strlen(name) - 1] = '\0'; // Remove trailing space
+
+    // Process tags
+    int tags[MAX_TAGS] = {0};
+    while (token && token[0] == '[') {
+      // Remove brackets
+      token[strlen(token) - 1] = '\0';
+      token++;
+
+      // Find or add tag
+      int tag_idx = -1;
+      for (int i = 0; i < deck->num_tags; i++) {
+        if (strcmp(deck->tag_names[i], token) == 0) {
+          tag_idx = i;
+          break;
+        }
+      }
+      if (tag_idx == -1) {
+        if (deck->num_tags >= MAX_TAGS) {
+          printf("Too many tags!\n");
+          continue;
+        }
+        tag_idx = deck->num_tags;
+        strcpy(deck->tag_names[deck->num_tags], token);
+        deck->num_tags++;
+      }
+      tags[tag_idx] = 1;
+
+      token = strtok(NULL, " \t\n");
+    }
+
+    // Add cards to deck
+    for (int i = 0; i < count; i++) {
+      if (deck->num_cards >= MAX_CARDS) {
+        printf("Too many cards!\n");
+        break;
+      }
+      strcpy(deck->cards[deck->num_cards].name, name);
+      memcpy(deck->cards[deck->num_cards].tags, tags, sizeof(tags));
+      deck->num_cards++;
+    }
+  }
+
+  fclose(file);
+  return deck;
 }
 
 // Print deck summary
-void print_deck_summary(Deck* deck) {
-    printf("\nDeck Summary:\n");
-    printf("Total cards: %d\n", deck->num_cards);
-    printf("Tags (%d):\n", deck->num_tags);
-    
-    // Count cards per tag
-    for (int i = 0; i < deck->num_tags; i++) {
-        int count = 0;
-        for (int j = 0; j < deck->num_cards; j++) {
-            if (deck->cards[j].tags[i]) count++;
-        }
-        printf("  %s: %d cards\n", deck->tag_names[i], count);
+void print_deck_summary(Deck *deck) {
+  printf("\nDeck Summary:\nTotal cards: %d\nTags (%d):\n", deck->num_cards,
+         deck->num_tags);
+
+  // Count cards per tag
+  for (int i = 0; i < deck->num_tags; i++) {
+    int count = 0;
+    for (int j = 0; j < deck->num_cards; j++) {
+      if (deck->cards[j].tags[i])
+        count++;
     }
+    printf("  %s: %d cards\n", deck->tag_names[i], count);
+  }
 }
 
-int main(int argc, char** argv) {
-    if (argc != 2) {
-        printf("Usage: %s <deck_file>\n", argv[0]);
-        return 1;
-    }
-    
-    // Seed the RNG
-    srand(time(NULL));
-    unsigned int base_seed = rand();
-    
-    // Parse deck file
-    Deck* deck = parse_deck_file(argv[1]);
-    if (!deck) return 1;
-    print_deck_summary(deck);
-    
-    // Get conditions from user
-    Conditions cond;
-    memset(&cond, 0, sizeof(cond));
-    
-    printf("\nEnter conditions for each tag:\n");
-    for (int i = 0; i < deck->num_tags; i++) {
-        printf("%s:\n", deck->tag_names[i]);
-        printf("  Minimum: ");
-        scanf("%d", &cond.min_counts[i]);
-        printf("  Maximum: ");
-        scanf("%d", &cond.max_counts[i]);
-    }
-    
+int main(int argc, char **argv) {
+  if (argc != 2) {
+    printf("Usage: %s <deck_file>\n", argv[0]);
+    return 1;
+  }
+
+  // Seed the RNG
+  srand(time(NULL));
+  unsigned int base_seed = rand();
+
+  // Parse deck file
+  Deck *deck = parse_deck_file(argv[1]);
+  if (!deck)
+    return 1;
+  print_deck_summary(deck);
+
+  // Get conditions from user
+  Conditions cond;
+  memset(&cond, 0, sizeof(cond));
+
+  printf("\nEnter conditions for each tag:\n");
+  for (int i = 0; i < deck->num_tags; i++) {
+    printf("%s:\n", deck->tag_names[i]);
+    printf("  Minimum: ");
+    scanf("%d", &cond.min_counts[i]);
+    printf("  Maximum: ");
+    scanf("%d", &cond.max_counts[i]);
+  }
+
 #ifdef __CUDACC__
-    // GPU Implementation
-    Deck* d_deck;
-    Conditions* d_cond;
-    int* d_results;
-    
-    cudaMalloc(&d_deck, sizeof(Deck));
-    cudaMalloc(&d_cond, sizeof(Conditions));
-    cudaMalloc(&d_results, NUM_THREADS * sizeof(int));
-    
-    cudaMemcpy(d_deck, deck, sizeof(Deck), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_cond, &cond, sizeof(Conditions), cudaMemcpyHostToDevice);
-    
-    int sims_per_thread = NUM_SIMULATIONS / NUM_THREADS;
-    simulate_kernel<<<1, NUM_THREADS>>>(d_deck, d_cond, d_results, sims_per_thread, base_seed);
-    
-    int results[NUM_THREADS];
-    cudaMemcpy(results, d_results, NUM_THREADS * sizeof(int), cudaMemcpyDeviceToHost);
-    
-    int total_successes = 0;
-    for (int i = 0; i < NUM_THREADS; i++) {
-        total_successes += results[i];
-    }
-    
-    cudaFree(d_deck);
-    cudaFree(d_cond);
-    cudaFree(d_results);
-    
+  // GPU Implementation
+  Deck *d_deck;
+  Conditions *d_cond;
+  int *d_results;
+
+  cudaMalloc(&d_deck, sizeof(Deck));
+  cudaMalloc(&d_cond, sizeof(Conditions));
+  cudaMalloc(&d_results, NUM_THREADS * sizeof(int));
+
+  cudaMemcpy(d_deck, deck, sizeof(Deck), cudaMemcpyHostToDevice);
+  cudaMemcpy(d_cond, &cond, sizeof(Conditions), cudaMemcpyHostToDevice);
+
+  int sims_per_thread = NUM_SIMULATIONS / NUM_THREADS;
+  simulate_kernel<<<1, NUM_THREADS>>>(d_deck, d_cond, d_results,
+                                      sims_per_thread, base_seed);
+
+  int results[NUM_THREADS];
+  cudaMemcpy(results, d_results, NUM_THREADS * sizeof(int),
+             cudaMemcpyDeviceToHost);
+
+  int total_successes = 0;
+  for (int i = 0; i < NUM_THREADS; i++) {
+    total_successes += results[i];
+  }
+
+  cudaFree(d_deck);
+  cudaFree(d_cond);
+  cudaFree(d_results);
+
 #else
-    // CPU Implementation
-    pthread_t threads[NUM_THREADS];
-    ThreadData thread_data[NUM_THREADS];
-    int results[NUM_THREADS];
-    
-    int sims_per_thread = NUM_SIMULATIONS / NUM_THREADS;
-    unsigned int base_seed = atoi(argv[2]);
-    for (int i = 0; i < NUM_THREADS; i++) {
-        thread_data[i].deck = deck;
-        thread_data[i].cond = &cond;
-        thread_data[i].result = &results[i];
-        thread_data[i].sims_per_thread = sims_per_thread;
-        thread_data[i].base_seed = base_seed + i;
-        pthread_create(&threads[i], NULL, thread_func, &thread_data[i]);
-    }
-    
-    int total_successes = 0;
-    for (int i = 0; i < NUM_THREADS; i++) {
-        pthread_join(threads[i], NULL);
-        total_successes += results[i];
-    }
+  // CPU Implementation
+  pthread_t threads[NUM_THREADS];
+  ThreadData thread_data[NUM_THREADS];
+  int results[NUM_THREADS];
+
+  int sims_per_thread = NUM_SIMULATIONS / NUM_THREADS;
+  for (int i = 0; i < NUM_THREADS; i++) {
+    thread_data[i].deck = deck;
+    thread_data[i].cond = &cond;
+    thread_data[i].result = &results[i];
+    thread_data[i].sims_per_thread = sims_per_thread;
+    thread_data[i].base_seed = base_seed + i;
+    pthread_create(&threads[i], NULL, thread_func, &thread_data[i]);
+  }
+
+  int total_successes = 0;
+  for (int i = 0; i < NUM_THREADS; i++) {
+    pthread_join(threads[i], NULL);
+    total_successes += results[i];
+  }
 #endif
-    
-    float probability = (float)total_successes / NUM_SIMULATIONS;
-    printf("\nResults:\n");
-    printf("Total simulations: %d\n", NUM_SIMULATIONS);
-    printf("Successful hands: %d\n", total_successes);
-    printf("Probability: %.2f%%\n", probability * 100);
-    
-    free(deck);
-    return 0;
+
+  float probability = (float)total_successes / NUM_SIMULATIONS;
+  printf("\nResults:\n");
+  printf("Total simulations: %d\n", NUM_SIMULATIONS);
+  printf("Successful hands: %d\n", total_successes);
+  printf("Probability: %.2f%%\n", probability * 100);
+
+  free(deck);
+  return 0;
 }
