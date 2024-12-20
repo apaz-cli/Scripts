@@ -163,7 +163,6 @@ typedef struct {
 void* thread_func(void* arg) {
     ThreadData* data = (ThreadData*)arg;
     rng_state rng;
-    unsigned int thread_seed;
     rand_r(&data->base_seed);  // Use base_seed to generate unique thread seed
     rng.x = data->base_seed + (unsigned int)pthread_self();
     *data->result = simulate_hands(data->deck, data->cond, 
