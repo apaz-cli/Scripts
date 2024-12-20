@@ -57,8 +57,9 @@ CUDA_CALLABLE unsigned int xorshift32(rng_state *state) {
 #define NUM_SIMULATIONS (10 * 1000 * 1000)
 #define THREADS_PER_BLOCK 32
 #define NUM_BLOCKS 46
+#define NUM_GRIDS 2
 #define NUM_PTHREADS 8
-#define TOTAL_THREADS (THREADS_PER_BLOCK * NUM_BLOCKS)
+#define TOTAL_THREADS (THREADS_PER_BLOCK * NUM_BLOCKS * NUM_GRIDS)
 
 // Structure to represent a single card
 typedef struct {
@@ -150,7 +151,7 @@ __global__ void simulate_kernel(Deck *d_deck, Conditions *d_cond,
   rng_state rng;
   rng.x = base_seed + threadIdx.x; // Different seed for each thread
   int result = simulate_hands(d_deck, d_cond, sims_per_thread, &rng);
-  d_results[threadIdx.x + blockIdx.x * blockDim.x] = result;
+  d_results[threadIdx.x + (blockIdx.x + blockIdx.y * NUM_BLOCKS) * blockDim.x] = result;
 }
 #endif
 
@@ -334,7 +335,8 @@ int main(int argc, char **argv) {
 
   int sims_per_thread = NUM_SIMULATIONS / TOTAL_THREADS;
   printf("Sims per thread: %d\n", sims_per_thread);
-  simulate_kernel<<<NUM_BLOCKS, THREADS_PER_BLOCK>>>(d_deck, d_cond, d_results,
+  dim3 grid(NUM_BLOCKS, NUM_GRIDS);
+  simulate_kernel<<<grid, THREADS_PER_BLOCK>>>(d_deck, d_cond, d_results,
                                       sims_per_thread, base_seed);
 
   int results[TOTAL_THREADS];
