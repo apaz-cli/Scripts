@@ -285,6 +285,9 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  // Start timing
+  clock_t start = clock();
+  
   // Seed the RNG
   srand(time(NULL));
   unsigned int base_seed = rand();
@@ -361,8 +364,12 @@ int main(int argc, char **argv) {
   }
 #endif
 
+  clock_t end = clock();
+  double elapsed = ((double)(end - start)) / CLOCKS_PER_SEC;
+  
   float probability = (float)total_successes / NUM_SIMULATIONS;
   printf("\nResults:\n");
+  printf("Time elapsed: %.2f seconds\n", elapsed);
   printf("Total simulations: %d\n", NUM_SIMULATIONS);
   printf("Successful hands: %d\n", total_successes);
   printf("Probability: %.2f%%\n", probability * 100);
