@@ -1,26 +1,40 @@
-#!/usr/bin/bash
+#!/usr/bin/env python3
 
-# Take a screenshot, store it in ~/Screenshots, and open in gimp.
+import os
+import time
+import subprocess
+from datetime import datetime
+from pathlib import Path
 
-# TODO: Fix. Should be made actually useful.
+def take_screenshot():
+    """Take a screenshot and open it in GIMP"""
+    
+    # Ensure Screenshots directory exists
+    screenshots_dir = Path.home() / "Screenshots"
+    screenshots_dir.mkdir(exist_ok=True)
+    
+    # Generate filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    screenshot_path = screenshots_dir / f"screenshot_{timestamp}.png"
+    
+    print("Taking screenshot in 5 seconds...")
+    time.sleep(5)
+    
+    # Take screenshot using scrot
+    try:
+        subprocess.run(["scrot", str(screenshot_path)], check=True)
+        print(f"Screenshot saved to: {screenshot_path}")
+        
+        # Open in GIMP
+        subprocess.run(["gimp", str(screenshot_path)], check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error: {e}")
+        return False
+    except FileNotFoundError:
+        print("Error: Required programs (scrot or gimp) not found")
+        return False
+        
+    return True
 
-cd ~/Screenshots/
-makeglob="import glob;g=glob.glob('/home/apaz/Screenshots/*.png')"
-#stripglob="g=''.join([c for c in str(g) if not c in ['\n',' ']])"
-printglob="$makeglob;print(str(g).replace(', ',','))"
-#[print('\"',l,'\"', sep='') for l in g]"
-tmp1=$(python -c "$printglob")
-echo tmp1 $tmp1
-
-#clear
-neofetch
-scrot -d 5
-
-tmp2=$(python -c "$printglob")
-echo tmp2 $tmp2
-name=$(python -c "l=[i for i in eval($tmp1) if not i in $tmp2];print(l);a=(print(l[0], end='') if len(l) else print('NOT_FOUND', end=''))")
-echo $name
-
-if [[ $name != 'NOT_FOUND' ]]; then 
-  gimp $name
-fi
+if __name__ == "__main__":
+    take_screenshot()
