@@ -3,4 +3,60 @@
 # Open my todo list.
 
 #xfce4-terminal --hide-scrollbar -e 'sh -c "nano ~/Documents/TODO"' -T "TODO"
-wnano ~/Documents/TODO
+
+if [ -z "$REPOS_DIR" ]; then
+    echo "REPOS_DIR is not set. Install the bashrc. Continuing with $HOME" 2>&1
+    REPOS_DIR="$HOME"
+fi
+
+if [ ! -d "$REPOS_DIR/Secrets" ]; then
+    echo "No secrets repo found. Be sure to clone it." 2>&1
+    exit 1
+fi
+
+if [ ! -d "$REPOS_DIR/Secrets/secrets" ]; then
+    echo "Secrets dir not extracted. Let's extract it." 2>&1
+    cd "$REPOS_DIR/Secrets"
+    ./loadsecrets
+fi
+
+# Actually edit the todo list.
+wnano "$REPOS_DIR/Secrets/secrets/TODO"
+
+# Prompt if the user wants to commit the changes.
+# Prompt if the user wants to commit the changes
+echo "Commit changes? [y/N]:"
+read -r commit
+if [ "$commit" = "Y" ] || [ "$commit" = "y" ]; then
+    cd "$REPOS_DIR/Secrets"
+    
+    # Save working directory state
+    STASH_RESULT=$(git stash push --keep-index $(git ls-files | grep -v "^secrets/TODO$") 2>&1)
+    STASH_STATUS=$?
+    STASH_CREATED=false
+    
+    if [ $STASH_STATUS -eq 0 ] && [[ ! "$STASH_RESULT" =~ "No local changes to save" ]]; then
+        STASH_CREATED=true
+    fi
+    
+    # Commit the file
+    git add secrets/TODO
+    git commit -m "Update TODO"
+    commit_status=$?
+    
+    # Restore original state if stash was created
+    if [ "$STASH_CREATED" = true ]; then
+        git stash pop
+        if [ $? -ne 0 ]; then
+            echo "Warning: Failed to restore working directory state. Observe the error message above. Your changes are in the stash."
+            echo "Use 'git stash list' to see your stashed changes."
+            echo "Use 'git stash pop' to try restoring them manually again."
+        fi
+    fi
+    
+    # Report status
+    if [ $commit_status -ne 0 ]; then
+        echo "Error: Failed to commit changes"
+        exit 1
+    fi
+fi
