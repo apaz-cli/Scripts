@@ -35,7 +35,7 @@ if [ "$commit" = "Y" ] || [ "$commit" = "y" ]; then
     STASH_STATUS=$?
     STASH_CREATED=false
     
-    if [ $STASH_STATUS -eq 0 ] && [[ ! "$STASH_RESULT" =~ "No local changes to save" ]]; then
+    if [ $STASH_STATUS -eq 0 ] && ! echo "$STASH_RESULT" | grep -q "No local changes to save"; then
         STASH_CREATED=true
     fi
     
