@@ -17,5 +17,5 @@ if [ "$CLONED" = "true" ]; then
 fi
 
 reset
-bin/hyfetch $@
+bin/hyfetch "$@"
 cd "$WD"

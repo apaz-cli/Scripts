@@ -3,4 +3,4 @@
 TMPF="/tmp/__import_torch__.py"
 echo "import torch;from torch import tensor" > $TMPF
 cd ~/git/tts/
-bin/python -i "$TMPF" $@
+bin/python -i "$TMPF" "$@"

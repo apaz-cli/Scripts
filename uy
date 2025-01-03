@@ -2,4 +2,4 @@
 
 # Misspelling of yt.
 
-yt $@
+yt "$@"

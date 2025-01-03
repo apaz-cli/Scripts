@@ -1,2 +1,2 @@
 #!/bin/bash
-yt-dlp --no-mtime $@
+yt-dlp --no-mtime "$@"

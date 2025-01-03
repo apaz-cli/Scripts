@@ -6,8 +6,8 @@
 # Check if in a git repo, use git grep if so. Regular grep otherwise.
 gb="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
 if [ -n "$gb" ]; then
-    git grep -n --color=auto $@
+    git grep -n --color=auto "$@"
 else
-    grep -rn --color=auto $@
+    grep -rn --color=auto "$@"
 fi
 

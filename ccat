@@ -8,4 +8,4 @@ if [ $# -lt 1 ]; then
 fi
 
 WF="$1"; shift
-codecat "$(which $WF)" $@
+codecat "$(which $WF)" "$@"

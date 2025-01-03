@@ -16,7 +16,7 @@ if [ "$1" = "-p" ] || [ "$1" = "--python" ]; then
   SHEBANG="#!/usr/bin/env python3\n"
   shift
 elif [ "$1" = "-c" ] || [ "$1" = "--cc" ]; then
-  SHEBANG='#if 0\nTMP="$(mktemp -d)"; cc -o "$TMP/a.out" -x c "$0" && "$TMP/a.out" $@; RVAL=$?; rm -rf "$TMP"; exit $RVAL\n#endif\n'
+  SHEBANG='#if 0\nTMP="$(mktemp -d)"; cc -o "$TMP/a.out" -x c "$0" && "$TMP/a.out" "$@"; RVAL=$?; rm -rf "$TMP"; exit $RVAL\n#endif\n'
   shift
 elif [ "$1" = "-b" ] || [ "$1" = "--bash" ]; then
   SHEBANG="#!/bin/bash\n"

@@ -2,4 +2,4 @@
 
 # Print a diff of the arguments in color, then preview with less.
 
-diff --color=always -U9999999999999999999 $@ | less -R
+diff --color=always -U9999999999999999999 "$@" | less -R

@@ -1,4 +1,4 @@
 #!/bin/sh
 
 # Chat with llama3, with my custom prompt to make it less annoying.
-ollama run ap-llama3 $@
+ollama run ap-llama3 "$@"

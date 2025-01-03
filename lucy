@@ -1,4 +1,4 @@
 #!/bin/sh
 
 # Run ollama with my custom assistant prompt.
-ollama run lucy $@
+ollama run lucy "$@"

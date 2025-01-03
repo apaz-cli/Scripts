@@ -1,2 +1,2 @@
 #!/bin/sh
-ls --color -la $@
+ls --color -la "$@"

@@ -11,7 +11,7 @@ else
 fi
 
 if [ ! -d "$_VENVNAME/bin" ]; then
-    python -m venv "$_VENVNAME" $@
+    python -m venv "$_VENVNAME" "$@"
 fi
 _REALVENV="$(realpath "$_VENVNAME")"
 

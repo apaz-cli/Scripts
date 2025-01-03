@@ -14,4 +14,4 @@ fi
 "$INSTALL_DIR/bin/pqa" \
   --llm "anthropic/litellm-claude-3-5-sonnet-20241022" \
   --summary_llm "anthropic/litellm-claude-3-5-sonnet-20241022" \
-  $@
+  "$@"

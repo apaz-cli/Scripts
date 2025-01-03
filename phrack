@@ -108,7 +108,7 @@ _download_archive() {
     NUM_ISSUES=$(ls -d phrack* | wc -l)
 }
 
-_read_stdin() { read $@ </dev/tty; }
+_read_stdin() { read "$@" </dev/tty; }
 _get_cursor_row() { local IFS=';'; _read_stdin -sdR -p $'\E[6n' ROW COL; echo "${ROW#*[}"; }
 _cursor_blink_on() { echo -en "\033[?25h" >&2; }
 _cursor_blink_off() { echo -en "\033[?25l" >&2; }

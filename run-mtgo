@@ -17,4 +17,4 @@ if [ $(id -Gn | grep -c docker) -eq 0 ]; then
 fi
 
 # Run run-mtgo
-/bin/run-mtgo $@
+/bin/run-mtgo "$@"

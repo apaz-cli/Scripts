@@ -8,4 +8,4 @@
 
 # This leaves just you and the text.
 
-nano -0v $@
+nano -0v "$@"

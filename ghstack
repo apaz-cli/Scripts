@@ -7,5 +7,5 @@ if [ ! -d "/tmp/ghstack" ]; then
   python -m venv /tmp/ghstack
   /tmp/ghstack/bin/pip install ghstack
 fi
-/tmp/ghstack/bin/ghstack $@
+/tmp/ghstack/bin/ghstack "$@"
 

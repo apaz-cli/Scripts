@@ -4,7 +4,7 @@
 # This helps debug command argument parsing.
 
 I=1
-for arg in $@; do
+for arg in "$@"; do
   echo "arg $I:" "$arg"
   I="$(expr $I + 1)"
 done
