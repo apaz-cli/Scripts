@@ -1,0 +1,91 @@
+#include <sys/types.h>
+#if 0
+TMP="$(mktemp -d /tmp/cshebang.XXXXXXXXX)"; cc -g -fsanitize=address -o "$TMP/a.out" -x c "$0" && "$TMP/a.out" $@; RVAL=$?; rm -rf "$TMP"; exit $RVAL
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <unistd.h>
+#include <termios.h>
+#include <sys/ioctl.h>
+#include <signal.h>
+
+static struct termios orig_termios;
+static int P[512];
+
+void cleanup() {
+    printf("\033[H\033[?25h\033[?1049l");
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+    fflush(stdout);
+    _exit(0);
+}
+
+void handle_signal(int sig) {
+    cleanup();
+}
+
+int main() {
+    tcgetattr(STDIN_FILENO, &orig_termios);
+    atexit(cleanup);
+    signal(SIGINT, handle_signal);
+    signal(SIGTERM, handle_signal);
+    signal(SIGQUIT, handle_signal);
+    
+    struct termios raw = orig_termios;
+    raw.c_lflag &= ~(ECHO | ICANON);
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+    printf("\033[?1049h\033[?25l");
+    
+    srand(time(NULL));
+    
+    int i;
+    for(i = 0; i < 256; i++)
+        P[i] = i;
+    for(i = 255; i > 0; i--) {
+        int j = rand() % (i + 1);
+        int temp = P[i];
+        P[i] = P[j];
+        P[j] = temp;
+    }
+    for(i = 0; i < 256; i++)
+        P[256 + i] = P[i];
+    
+    struct winsize w;
+    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+    double offset_y = 0.0;
+    const double SCALE = 0.1;
+    
+    while(1) {
+        int bytesWaiting;
+        ioctl(STDIN_FILENO, FIONREAD, &bytesWaiting);
+        if(bytesWaiting && getchar() == 'q') break;
+        printf("\033[H");
+        for(int y = 0; y < w.ws_row; y++) {
+            for(int x = 0; x < w.ws_col; x++) {
+                int idx = (int)(((1 - (((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE)) * ((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE)) * ((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE)) * (((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE)) * (((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE)) * 6 - 15) + 10))) * 
+                    ((1 - ((x * SCALE - (int)(x * SCALE)) * (x * SCALE - (int)(x * SCALE)) * (x * SCALE - (int)(x * SCALE)) * ((x * SCALE - (int)(x * SCALE)) * ((x * SCALE - (int)(x * SCALE)) * 6 - 15) + 10))) * 
+                        ((((P[P[P[(int)(x * SCALE) & 255] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) & 1) == 0 ? ((P[P[P[(int)(x * SCALE) & 255] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) < 8 ? (x * SCALE - (int)(x * SCALE)) : ((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE))) : -((P[P[P[(int)(x * SCALE) & 255] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) < 8 ? (x * SCALE - (int)(x * SCALE)) : ((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE)))) + 
+                        (((P[P[P[(int)(x * SCALE) & 255] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) & 2) == 0 ? ((P[P[P[(int)(x * SCALE) & 255] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) < 4 ? ((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE)) : (P[P[P[(int)(x * SCALE) & 255] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) == 12 || (P[P[P[(int)(x * SCALE) & 255] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) == 14 ? (x * SCALE - (int)(x * SCALE)) : 0) : -((P[P[P[(int)(x * SCALE) & 255] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) < 4 ? ((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE)) : (P[P[P[(int)(x * SCALE) & 255] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) == 12 || (P[P[P[(int)(x * SCALE) & 255] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) == 14 ? (x * SCALE - (int)(x * SCALE)) : 0))) + 
+                        ((x * SCALE - (int)(x * SCALE)) * (x * SCALE - (int)(x * SCALE)) * (x * SCALE - (int)(x * SCALE)) * ((x * SCALE - (int)(x * SCALE)) * ((x * SCALE - (int)(x * SCALE)) * 6 - 15) + 10)) * 
+                        ((((P[P[P[((int)(x * SCALE) & 255) + 1] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) & 1) == 0 ? ((P[P[P[((int)(x * SCALE) & 255) + 1] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) < 8 ? ((x * SCALE - (int)(x * SCALE))-1) : ((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE))) : -((P[P[P[((int)(x * SCALE) & 255) + 1] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) < 8 ? ((x * SCALE - (int)(x * SCALE))-1) : ((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE)))) + 
+                        (((P[P[P[((int)(x * SCALE) & 255) + 1] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) & 2) == 0 ? ((P[P[P[((int)(x * SCALE) & 255) + 1] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) < 4 ? ((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE)) : (P[P[P[((int)(x * SCALE) & 255) + 1] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) == 12 || (P[P[P[((int)(x * SCALE) & 255) + 1] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) == 14 ? ((x * SCALE - (int)(x * SCALE))-1) : 0) : -((P[P[P[((int)(x * SCALE) & 255) + 1] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) < 4 ? ((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE)) : (P[P[P[((int)(x * SCALE) & 255) + 1] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) == 12 || (P[P[P[((int)(x * SCALE) & 255) + 1] + ((int)((y + offset_y) * SCALE) & 255)]] & 15) == 14 ? ((x * SCALE - (int)(x * SCALE))-1) : 0)))) + 
+                    (((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE)) * ((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE)) * ((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE)) * (((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE)) * (((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE)) * 6 - 15) + 10)) * 
+                    ((1 - ((x * SCALE - (int)(x * SCALE)) * (x * SCALE - (int)(x * SCALE)) * (x * SCALE - (int)(x * SCALE)) * ((x * SCALE - (int)(x * SCALE)) * ((x * SCALE - (int)(x * SCALE)) * 6 - 15) + 10))) * 
+                        ((((P[P[P[(int)(x * SCALE) & 255] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) & 1) == 0 ? ((P[P[P[(int)(x * SCALE) & 255] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) < 8 ? (x * SCALE - (int)(x * SCALE)) : (((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE))-1)) : -((P[P[P[(int)(x * SCALE) & 255] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) < 8 ? (x * SCALE - (int)(x * SCALE)) : (((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE))-1))) + 
+                        (((P[P[P[(int)(x * SCALE) & 255] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) & 2) == 0 ? ((P[P[P[(int)(x * SCALE) & 255] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) < 4 ? (((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE))-1) : (P[P[P[(int)(x * SCALE) & 255] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) == 12 || (P[P[P[(int)(x * SCALE) & 255] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) == 14 ? (x * SCALE - (int)(x * SCALE)) : 0) : -((P[P[P[(int)(x * SCALE) & 255] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) < 4 ? (((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE))-1) : (P[P[P[(int)(x * SCALE) & 255] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) == 12 || (P[P[P[(int)(x * SCALE) & 255] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) == 14 ? (x * SCALE - (int)(x * SCALE)) : 0))) + 
+                        ((x * SCALE - (int)(x * SCALE)) * (x * SCALE - (int)(x * SCALE)) * (x * SCALE - (int)(x * SCALE)) * ((x * SCALE - (int)(x * SCALE)) * ((x * SCALE - (int)(x * SCALE)) * 6 - 15) + 10)) * 
+                        ((((P[P[P[((int)(x * SCALE) & 255) + 1] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) & 1) == 0 ? ((P[P[P[((int)(x * SCALE) & 255) + 1] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) < 8 ? ((x * SCALE - (int)(x * SCALE))-1) : (((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE))-1)) : -((P[P[P[((int)(x * SCALE) & 255) + 1] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) < 8 ? ((x * SCALE - (int)(x * SCALE))-1) : (((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE))-1))) + 
+                        (((P[P[P[((int)(x * SCALE) & 255) + 1] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) & 2) == 0 ? ((P[P[P[((int)(x * SCALE) & 255) + 1] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) < 4 ? (((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE))-1) : (P[P[P[((int)(x * SCALE) & 255) + 1] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) == 12 || (P[P[P[((int)(x * SCALE) & 255) + 1] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) == 14 ? ((x * SCALE - (int)(x * SCALE))-1) : 0) : -((P[P[P[((int)(x * SCALE) & 255) + 1] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) < 4 ? (((y + offset_y) * SCALE - (int)((y + offset_y) * SCALE))-1) : (P[P[P[((int)(x * SCALE) & 255) + 1] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) == 12 || (P[P[P[((int)(x * SCALE) & 255) + 1] + (((int)((y + offset_y) * SCALE) & 255) + 1)]] & 15) == 14 ? ((x * SCALE - (int)(x * SCALE))-1) : 0)))) + 1.0) * 4.0);
+                idx = idx < 0 ? 0 : idx >= 8 ? 7 : idx;
+                printf("\033[%d;%dH\033[%ldm%c\033[0m", y+1, x+1, (0x0020202021211F1F1F >> (idx << 3)) & 0xFF, " .-=+*#%@"[idx]);
+            }
+        }
+        
+        offset_y += 0.1;
+        
+        fflush(stdout);
+        usleep(50000);
+    }
+    return 0;
+}

@@ -5,8 +5,11 @@
 #xfce4-terminal --hide-scrollbar -e 'sh -c "nano ~/Documents/TODO"' -T "TODO"
 
 if [ -z "$REPOS_DIR" ]; then
-    echo "REPOS_DIR is not set. Install the bashrc. Continuing with $HOME" 2>&1
-    REPOS_DIR="$HOME"
+    if [ -d "$HOME/git" ]; then
+        REPOS_DIR="$HOME/git"
+    else
+        REPOS_DIR="$HOME"
+    fi
 fi
 
 if [ ! -d "$REPOS_DIR/Secrets" ]; then
@@ -21,7 +24,7 @@ if [ ! -d "$REPOS_DIR/Secrets/secrets" ]; then
 fi
 
 # Actually edit the todo list.
-wnano "$REPOS_DIR/Secrets/secrets/TODO"
+nano -Sa0 "$REPOS_DIR/Secrets/secrets/TODO"
 
 # Prompt if the user wants to commit the changes.
 # Prompt if the user wants to commit the changes
@@ -29,21 +32,24 @@ echo "Commit changes? [y/N]:"
 read -r commit
 if [ "$commit" = "Y" ] || [ "$commit" = "y" ]; then
     cd "$REPOS_DIR/Secrets"
-    
+
     # Save working directory state
     STASH_RESULT=$(git stash push --keep-index $(git ls-files | grep -v "^secrets/TODO$") 2>&1)
     STASH_STATUS=$?
     STASH_CREATED=false
-    
+
     if [ $STASH_STATUS -eq 0 ] && ! echo "$STASH_RESULT" | grep -q "No local changes to save"; then
         STASH_CREATED=true
     fi
-    
+
+    # Rebuild the archive bin
+    ./savesecrets
+
     # Commit the file
-    git add secrets/TODO
-    git commit -m "Update TODO"
+    git add secrets.bin env_vars.bin
+    git commit -m "Upload new archive."
     commit_status=$?
-    
+
     # Restore original state if stash was created
     if [ "$STASH_CREATED" = true ]; then
         git stash pop
@@ -53,10 +59,17 @@ if [ "$commit" = "Y" ] || [ "$commit" = "y" ]; then
             echo "Use 'git stash pop' to try restoring them manually again."
         fi
     fi
-    
+
     # Report status
     if [ $commit_status -ne 0 ]; then
         echo "Error: Failed to commit changes"
+        exit 1
+    fi
+
+    # Push the changes
+    git push
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to push changes"
         exit 1
     fi
 fi

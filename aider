@@ -1,23 +1,80 @@
 #!/bin/sh
 
-if [ -z "$REPOS_DIR" ]; then
-    echo "REPOS_DIR is not set."
-    exit 1
-fi
-
 CURRENT_WD="$(pwd)"
-AIDER_DIR="$REPOS_DIR/aider"
-AIDER_BIN="$AIDER_DIR/bin/aider"
+PARENT_DIR="/tmp"
+AIDER_DIR="$PARENT_DIR/aider"
+AIDER_BIN="$AIDER_DIR/.venv/bin/aider"
 
 if [ ! -d "$AIDER_DIR" ]; then
     echo "Installing aider."
-    cd "$REPOS_DIR"
-    git clone https://github.com/paul-gauthier/aider
+    cd "$PARENT_DIR"
+    git clone --depth=1 https://github.com/paul-gauthier/aider
     cd aider/
-    python -m venv .
-    . bin/activate
-    bin/pip install -e .
+    python -m venv .venv
+    . .venv/bin/activate
+    .venv/bin/pip install -e .
+    .venv/bin/pip install --upgrade --upgrade-strategy only-if-needed 'aider-chat[browser]'
+fi
+cd "$CURRENT_WD"
+
+# Parse args
+# Args:
+# -n, --no-conventions
+# -l, --lucy # A personality extension. More to come later.
+
+DEFAULT_CONVENTIONS="true"
+LUCY_CONVENTIONS="false"
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            echo "Usage: aider [options] [args]"
+            echo "Options:"
+            echo "  -n, --no-conventions  Remove all conventions files (including the default)."
+            echo "  -l, --lucy            Add the Lucy conventions file."
+            echo "  -h, --help            Show this help message."
+            exit 0
+            ;;
+        -n|--no-conventions)
+            DEFAULT_CONVENTIONS="false"
+            LUCY_CONVENTIONS="false"
+            shift
+            ;;
+        -l|--lucy)
+            LUCY_CONVENTIONS="true"
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# If no secrets repo is present, no conventions. Otherwise, use them.
+if [ ! -d "$SECRETS_DIR" ]; then
+    echo "No conventions found. Clone and extract the secrets dir to set up conventions." >&2
+    DEFAULT_CONVENTIONS="false"
+    LUCY_CONVENTIONS="false"
+else
+    DEFAULT_CONVENTIONS_PATH="$SECRETS_DIR/secrets/CONVENTIONS.md"
+    LUCY_CONVENTIONS_PATH="$SECRETS_DIR/secrets/LUCY.md"
 fi
 
-cd "$CURRENT_WD"
-$AIDER_BIN --dark-mode "$@"
+# Add together all the flags necessary.
+ALL_CONVENTIONS=""
+if [ "$DEFAULT_CONVENTIONS" = "true" ]; then
+    if [ ! -f "$DEFAULT_CONVENTIONS_PATH" ]; then
+        echo "Default conventions file not found." >&2
+    else
+        ALL_CONVENTIONS="$ALL_CONVENTIONS --read $DEFAULT_CONVENTIONS_PATH"
+    fi
+fi
+if [ "$LUCY_CONVENTIONS" = "true" ]; then
+    if [ ! -f "$LUCY_CONVENTIONS_PATH" ]; then
+        echo "Lucy conventions file not found." >&2
+    else
+        ALL_CONVENTIONS="$ALL_CONVENTIONS --read $LUCY_CONVENTIONS_PATH"
+    fi
+fi
+
+# Finally run the command.
+$AIDER_BIN $ALL_CONVENTIONS --dark-mode "$@"

@@ -2,4 +2,4 @@
 
 # Shorthand for git grep.
 
-git grep -r $@
+git grep -r "$@"
