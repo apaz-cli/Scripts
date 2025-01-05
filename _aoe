@@ -161,7 +161,7 @@ async def deepseek_chat(message: str, *, system: str = None, model: str = None,
     messages.append({"role": "user", "content": message})
     
     response = await client.chat.completions.create(
-        model=model,
+        model="deepseek-chat",
         messages=messages,
         temperature=temperature,
         max_tokens=max_tokens,
