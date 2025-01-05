@@ -1,0 +1,624 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import json
+import time
+import asyncio
+from pathlib import Path
+from typing import Dict, List, Optional, Any, Callable
+from dataclasses import dataclass
+import anthropic
+import openai
+from google.generativeai import GenerativeModel
+import aiohttp
+
+# Map of model shortcodes to full model names
+MODELS = {
+    # GPT by OpenAI
+    'gm': 'gpt-4o-mini',
+    'g': 'gpt-4o-2024-11-20',
+    
+    # o1 by OpenAI
+    'om': 'o1-mini',
+    'o': 'o1',
+    
+    # Claude by Anthropic
+    'cm': 'claude-3-5-haiku-20241022',
+    'C': 'claude-3-5-sonnet-20241022',
+    'c': 'claude-3-5-sonnet-20240620',
+    
+    'd': 'deepseek-chat',
+    
+    # Llama by Meta
+    'lm': 'meta-llama/llama-3.1-8b-instruct',
+    'l': 'meta-llama/llama-3.3-70b-instruct',
+    'L': 'meta-llama/llama-3.1-405b-instruct',
+    
+    # Gemini by Google
+    'i': 'gemini-2.0-flash-exp',
+    'I': 'gemini-exp-1206'
+}
+
+async def get_token(vendor: str) -> str:
+    """Read API token from config file"""
+    token_path = os.path.join(os.path.expanduser('~'), '.config', f'{vendor}.token')
+    try:
+        with open(token_path) as f:
+            return f.read().strip()
+    except Exception as e:
+        print(f"Error reading {vendor}.token file:", e, file=sys.stderr)
+        sys.exit(1)
+
+async def openai_chat(message: str, *, system: str = None, model: str = None,
+                     temperature: float = 0.0, max_tokens: int = 8192,
+                     stream: bool = True, **kwargs) -> str:
+    """OpenAI chat completion"""
+    client = openai.OpenAI(api_key=await get_token('openai'))
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": message})
+    
+    response = await client.chat.completions.create(
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        stream=stream
+    )
+    
+    result = ""
+    if stream:
+        async for chunk in response:
+            text = chunk.choices[0].delta.content or ""
+            print(text, end="", flush=True)
+            result += text
+    else:
+        result = response.choices[0].message.content
+        
+    return result
+
+async def anthropic_chat(message: str, *, system: str = None, model: str = None,
+                        temperature: float = 0.0, max_tokens: int = 8192,
+                        stream: bool = True, **kwargs) -> str:
+    """Anthropic chat completion"""
+    client = anthropic.Anthropic(api_key=await get_token('anthropic'))
+    
+    response = await client.messages.create(
+        model=model,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        system=system,
+        messages=[{"role": "user", "content": message}],
+        stream=stream
+    )
+    
+    result = ""
+    if stream:
+        async for chunk in response:
+            text = chunk.delta.text or ""
+            print(text, end="", flush=True)
+            result += text
+    else:
+        result = response.content[0].text
+        
+    return result
+
+async def gemini_chat(message: str, *, system: str = None, model: str = None,
+                     temperature: float = 0.0, max_tokens: int = 8192,
+                     stream: bool = True, **kwargs) -> str:
+    """Google Gemini chat completion"""
+    client = GenerativeModel(model, api_key=await get_token('google'))
+    
+    response = await client.generate_content(
+        message,
+        generation_config={
+            "temperature": temperature,
+            "max_output_tokens": max_tokens,
+        },
+        stream=stream
+    )
+    
+    result = ""
+    if stream:
+        async for chunk in response:
+            text = chunk.text
+            print(text, end="", flush=True)
+            result += text
+    else:
+        result = response.text
+        
+    return result
+
+async def chat(model: str) -> Callable:
+    """Factory function to create chat completion function based on model"""
+    model = MODELS.get(model, model)
+    
+    if model.startswith(('gpt', 'o1')):
+        return openai_chat
+    elif model.startswith('claude'):
+        return anthropic_chat
+    elif model.startswith('gemini'):
+        return gemini_chat
+    else:
+        raise ValueError(f"Unsupported model: {model}")
+
+# End of inlined Chat.py functionality
+
+# Constants
+GROUP_SIZE = 2
+PARALLEL = True
+START_TIME = time.time()
+
+@dataclass
+class CodeChunk:
+    chunk: str
+    path: str
+    id: int
+
+def trimmer(s: str) -> str:
+    """Trim function that preserves leading spaces"""
+    return s.strip('\n')
+
+def get_chunks(content: str) -> List[str]:
+    """Split content into chunks (sequences of non-empty lines)"""
+    return [chunk for chunk in map(trimmer, content.split('\n\n')) if chunk]
+
+def shorten_chunk(chunk: str, aggressive: bool = False, xml: bool = False) -> str:
+    """Summarize a chunk by showing its first comment and first non-comment line"""
+    lines = chunk.split('\n')
+    if lines[0] in ('--show--', '//show//'):
+        return '\n'.join(lines[1:])
+    
+    if not aggressive:
+        first_line = lines[0]
+        is_first_line_comment = any(
+            first_line.strip().startswith(c) 
+            for c in ('//', '--', '#')
+        )
+        
+        if is_first_line_comment:
+            first_non_comment = next(
+                (line for line in lines if not any(
+                    line.strip().startswith(c) 
+                    for c in ('//', '--', '#')
+                )), 
+                None
+            )
+            if first_non_comment:
+                return f"{first_line}\n{first_non_comment}..."
+            return f"{first_line}..."
+        return f"{first_line}..."
+    return "" if not xml else chunk
+
+def long_chunk(chunk: str) -> str:
+    """Return full chunk content, handling show directives"""
+    lines = chunk.split('\n')
+    if lines[0] in ('--show--', '//show//'):
+        return '\n'.join(lines[1:])
+    return '\n'.join(lines)
+
+async def load_files(dir_path: str) -> List[dict]:
+    """Load all code files recursively"""
+    results = []
+    for root, _, files in os.walk(dir_path):
+        for file in files:
+            if file.endswith(('.py', '.hs', '.js', '.mjs', '.ts', '.kind', '.hvml', '.c')):
+                file_path = os.path.join(root, file)
+                with open(file_path, 'r') as f:
+                    content = f.read()
+                results.append({'path': file_path, 'content': content})
+    return results
+
+async def load_context() -> List[CodeChunk]:
+    """Load context from files"""
+    try:
+        with open(os.path.join(os.getcwd(), '.aoe.json'), 'r') as f:
+            config = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as err:
+        # If no config file or invalid JSON, proceed with default behavior
+        if isinstance(err, FileNotFoundError):
+            print("No .aoe.json config file found, using defaults", file=sys.stderr)
+        else:
+            print("Invalid .aoe.json config file, using defaults", file=sys.stderr)
+        config = {'path': '.'}
+    
+    files = await load_files(config['path'])
+    context = []
+    chunk_id = 0
+    
+    for file in files:
+        chunks = get_chunks(file['content'])
+        for chunk in chunks:
+            context.append(CodeChunk(
+                chunk=chunk,
+                path=file['path'],
+                id=chunk_id
+            ))
+            chunk_id += 1
+    
+    return context
+
+async def save_context(context: List[CodeChunk]):
+    """Save context back to files"""
+    file_map = {}
+    for item in context:
+        if item.path not in file_map:
+            file_map[item.path] = []
+        file_map[item.path].append(item.chunk)
+    
+    for file_path, chunks in file_map.items():
+        content = '\n\n'.join(map(trimmer, chunks)) + '\n'
+        with open(file_path, 'w') as f:
+            f.write(content)
+
+def shorten_context(context: List[CodeChunk], shown_chunks: Dict[int, bool], 
+                   aggressive: bool = False, xml: bool = False) -> str:
+    """Generate shortened context"""
+    result = []
+    current_file = ''
+    
+    for item in context:
+        body = item.chunk if shown_chunks.get(item.id) else shorten_chunk(item.chunk, aggressive)
+        if body:
+            if item.path != current_file:
+                result.append(f"\n{item.path}:")
+                current_file = item.path
+            
+            if xml:
+                result.append(f"<block id={item.id}>")
+            result.append(body)
+            if xml:
+                result.append("</block>")
+    
+    return '\n'.join(result).strip()
+
+PICKER_SYSTEM = lambda codebase, chunks, query: f'''
+You're an advanced software analyst, specialized in predicting when a refactor will affect a specific block of code.
+
+For example, consider the following refactor:
+
+<refactor>
+represent vectors as [x,y] instead of {{x,y}}
+</refactor>
+
+Then, given the following target blocks:
+
+<target>
+<block id=2>
+// Vector Library
+</block>
+<block id=3>
+funciton neg(v) {{
+  return {{x: -v.x, y: -v.y}};
+}}
+</block>
+<block id=4>
+function dot(a, b) {{
+  return sum(mul(a, b));
+}}
+</block>
+<block id=5>
+function add(a, b) {{
+</block>
+<block id=6>
+  return {{x: a.x + b.x, y: a.y + b.y}};
+</block>
+<block id=7>
+}}
+</block>
+<block id=8>
+// Example: len({{x:3,y:4}}) == 5
+function len(v) {{
+  return Math.sqrt(dot(v));
+}}
+</block>
+</target>
+
+Your goal is to answer the following question:
+
+> After the refactor is completed, which of the target blocks will have been changed?
+
+Start by answering the question for each block:
+
+- Block 2: The refactor will affect the Vector library, but that block is just a title comment, which isn't directly affected. No.
+- Block 3: That block constructs a vector using the old format, which must be updated. Yes.
+- Block 4: That block uses vectors, but the refactor doesn't affect it code directly. No.
+- Block 5: The add function will be affected by this refactor, but that block contains only the function declaration, which isn't directly affected. No.
+- Block 6: That block constructs a vector using the old format, which must be updated. Yes.
+- Block 7: That block just closes the add function with a '}}', which isn't affected by the refactor. No.
+- Block 8: The len function isn't directly affected by this refactor, but this block has a comment that must be adjusted. Yes.
+
+Then, complete your goal by writing with a JSON object mapping block ids to a boolean prediction.
+
+In this example, the final answer should be:
+
+{{"changed":{{"2":false,"3":true,"4":false,"5":false,"6":true,"7":false,"8":true}}}}
+
+Don't use spaces or newlines inside the JSON.
+
+Pay extra attention to the fact that the answer must only be 'true' when the block's actual text content needs to change.
+Even if a block uses concepts related to the refactor, it should be marked as 'false' unless its literal code requires modification.
+'''
+
+PICKER_MESSAGE = lambda codebase, chunks, query: f'''
+Before we start, let me give you some helpful context. We're working on the following codebase:
+
+<codebase>
+{codebase}
+</codebase>
+
+(Note: many parts have been omitted.)
+
+The proposed refactor is:
+
+<refactor>
+{query}
+</refactor>
+
+We're refactoring the following target code blocks:
+
+<target>
+{chunks}
+</target>
+
+Now, answer the following question:
+
+> After the refactor is completed, which of the target blocks will have been changed?
+
+Start by answering that question individually for each block. Be concise.
+
+Then, write your final answer, as a JSON object mapping block IDs to boolean predictions.
+
+Do it now.
+'''
+
+async def process_chunks(chunks: List[CodeChunk], query: str, picker_model: str):
+    """Process chunks using the Picker to determine which need editing"""
+    shown_chunks = {c.id: True for c in chunks}
+    codebase = shorten_context(context, shown_chunks, True, False)
+    chunks_text = '\n'.join(
+        f'<block id={c.id}>\n{long_chunk(c.chunk)}\n</block>'
+        for c in chunks
+    )
+    
+    message = PICKER_MESSAGE(codebase, chunks_text, query)
+    system = PICKER_SYSTEM(codebase, chunks_text, query)
+    
+    response = await chat(picker_model)(message, {
+        'system': system,
+        'system_cacheable': True,
+        'stream': False
+    })
+    
+    try:
+        import re
+        json_match = re.search(r'\{"changed":[^}]+\}', response)
+        if not json_match:
+            print("No valid JSON found in response:", file=sys.stderr)
+            print(response, file=sys.stderr)
+            return {}
+        
+        edit_decisions = json.loads(json_match.group(0))['changed']
+    except Exception as e:
+        print("Failed to parse JSON response:", e, file=sys.stderr)
+        return {}
+    
+    for chunk in chunks:
+        if edit_decisions.get(str(chunk.id)):
+            chunk_summary = shorten_chunk(chunk.chunk).split('\n')[0].strip()
+            print('\x1b[2m' + f"#{chunk.id}: {chunk_summary}..." + '\x1b[0m')
+    
+    return {
+        str(item.id): {
+            'chunk': item,
+            'edit': edit_decisions.get(str(item.id), False),
+            'relevant': []
+        }
+        for item in chunks
+    }
+
+EDITOR_SYSTEM = '''You're an advanced coding agent, specialized in refactoring blocks of code.
+
+For example, consider the following refactor:
+
+<refactor>
+represent vectors as [x,y] instead of {x,y}
+</refactor>
+
+Then, given the following target blocks:
+
+<target>
+<block id=2>
+// Vector Library
+</block>
+<block id=3>
+funciton neg(v) {
+  return {x: -v.x, y: -v.y};
+}
+</block>
+<block id=4>
+function dot(a, b) {
+  return sum(mul(a, b));
+}
+</block>
+<block id=5>
+function add(a, b) {
+</block>
+<block id=6>
+  return {x: a.x + b.x, y: a.y + b.y};
+</block>
+<block id=7>
+}
+</block>
+<block id=8>
+// Example: len({x:3,y:4}) == 5
+function len(v) {
+  return Math.sqrt(dot(v));
+}
+</block>
+</target>
+
+Your must ask yourself the following question:
+
+> Which of the target blocks must be changed to perform this refactor?
+
+Start by answering the question for each block:
+
+- Block 2: The refactor will affect the Vector library, but that's just a title comment, that isn't directly affected. No.
+- Block 3: That block constructs a vector using the old format, which must be updated. Yes.
+- Block 4: That block uses vectors, but the refactor doesn't affect it code directly. No.
+- Block 5: The add function will be affected by this refactor, but that block contains only the function declaration, which isn't directly affected. No.
+- Block 6: That block constructs a vector using the old format, which must be updated. Yes.
+- Block 7: That block just closes the add function with a '}', which isn't affected by the refactor. No.
+- Block 8: The len function isn't directly affected by this refactor, but this block has a comment that must be adjusted. Yes.
+
+Then, complete your goal by writing the updated version of each block that requires change, in the following format:
+
+<block id=3>
+funciton neg(v) {
+  return [-v.x, -v.y];
+}
+</block>
+<block id=4>
+function dot(a, b) {
+  return sum(mul(a, b));
+}
+</block>
+<block id=6>
+  return [a.x + b.x, a.y + b.y];
+</block>
+<block id=8>
+// Example: len([3,4]) == 5
+function len(v) {
+  return Math.sqrt(dot(v));
+}
+</block>'''
+
+EDITOR_MESSAGE = lambda codebase, chunks_to_edit, query: f'''
+For context, here's a shortened version of our codebase:
+
+<codebase>
+{codebase}
+</codebase>
+
+Your task is to perform the following refactoring:
+
+<refactor>
+{query}
+</refactor>
+
+Below are the target code blocks you need to consider:
+
+<target>
+{chunks_to_edit}
+</target>
+
+Now, provide the updated version of each block that requires changes, using this format:
+
+<block id=X>
+... refactored code here ...
+</block>
+
+IMPORTANT:
+Only make changes directly related to the specified refactor.
+Do not fix or alter any code unless it's necessary to complete the refactoring task.
+
+Please proceed with the refactoring now.
+'''
+
+async def edit_chunks(chunks_to_edit: List[CodeChunk], query: str, editor_model: str):
+    """Edit chunks that need modification"""
+    shown_chunks = {}
+    codebase = shorten_context(context, shown_chunks, False, False)
+    chunks_text = '\n'.join(
+        f'<block id={c.id}>\n{c.chunk}\n</block>'
+        for c in chunks_to_edit
+    )
+    
+    message = EDITOR_MESSAGE(codebase, chunks_text, query)
+    print("\x1b[1m# Editing the selected blocks...\x1b[0m")
+    
+    response = await chat(editor_model)(message, {
+        'system': EDITOR_SYSTEM,
+        'system_cacheable': True,
+        'stream': True
+    })
+    
+    import re
+    refactored_chunks = {}
+    for match in re.finditer(r'<block id=(\d+)>([\s\S]*?)</block>', response):
+        id_, content = match.groups()
+        refactored_chunks[id_] = content.strip()
+    
+    return refactored_chunks
+
+def format_log(log: List[str]) -> str:
+    """Format conversation log"""
+    return '\n'.join(log).strip()
+
+async def main():
+    if len(sys.argv) < 2:
+        print("Please provide a query as argument", file=sys.stderr)
+        sys.exit(1)
+    
+    query = sys.argv[1]
+    picker_model = sys.argv[2] if len(sys.argv) > 2 else "d"
+    editor_model = sys.argv[3] if len(sys.argv) > 3 else "c"
+    
+    print(f"Picker-Model: {MODELS[picker_model]}")
+    print(f"Editor-Model: {MODELS[editor_model]}")
+    
+    global context
+    context = await load_context()
+    
+    print("\x1b[1m# Selecting relevant chunks...\x1b[0m")
+    
+    # Create chunk groups
+    chunk_groups = [
+        context[i:i + GROUP_SIZE]
+        for i in range(0, len(context), GROUP_SIZE)
+    ]
+    
+    # Process chunks either in parallel or sequentially
+    if PARALLEL:
+        chunk_picks = await asyncio.gather(
+            *[process_chunks(group, query, picker_model)
+              for group in chunk_groups]
+        )
+    else:
+        chunk_picks = []
+        for group in chunk_groups:
+            result = await process_chunks(group, query, picker_model)
+            chunk_picks.append(result)
+    
+    flattened_chunk_picks = {
+        k: v
+        for d in chunk_picks
+        for k, v in d.items()
+    }
+    
+    # Get chunks that need editing
+    chunks_to_edit = [
+        result['chunk']
+        for result in flattened_chunk_picks.values()
+        if result['edit']
+    ]
+    
+    # Edit the chunks
+    refactored_chunks = await edit_chunks(chunks_to_edit, query, editor_model)
+    
+    # Update the context with refactored chunks
+    for item in context:
+        if str(item.id) in refactored_chunks:
+            item.chunk = refactored_chunks[str(item.id)]
+    
+    # Save the updated context back to files
+    await save_context(context)
+    
+    print("Refactoring completed and saved to files.")
+    print(f"Total execution time: {time.time() - START_TIME:.2f} seconds")
+
+if __name__ == '__main__':
+    asyncio.run(main())
