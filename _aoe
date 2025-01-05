@@ -40,7 +40,7 @@ MODELS = {
     'I': 'gemini-exp-1206'
 }
 
-async def get_token(vendor: str) -> str:
+def get_token(vendor: str) -> str:
     """Get API token from environment variable or config file"""
     env_vars = {
         'openai': 'OPENAI_API_KEY',
@@ -69,7 +69,7 @@ async def openai_chat(message: str, *, system: str = None, model: str = None,
                      temperature: float = 0.0, max_tokens: int = 8192,
                      stream: bool = True, **kwargs) -> str:
     """OpenAI chat completion"""
-    client = openai.OpenAI(api_key=await get_token('openai'))
+    client = openai.OpenAI(api_key=get_token('openai'))
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
@@ -98,7 +98,7 @@ async def anthropic_chat(message: str, *, system: str = None, model: str = None,
                         temperature: float = 0.0, max_tokens: int = 8192,
                         stream: bool = True, **kwargs) -> str:
     """Anthropic chat completion"""
-    client = anthropic.Anthropic(api_key=await get_token('anthropic'))
+    client = anthropic.Anthropic(api_key=get_token('anthropic'))
     
     response = await client.messages.create(
         model=model,
@@ -124,7 +124,7 @@ async def gemini_chat(message: str, *, system: str = None, model: str = None,
                      temperature: float = 0.0, max_tokens: int = 8192,
                      stream: bool = True, **kwargs) -> str:
     """Google Gemini chat completion"""
-    client = GenerativeModel(model, api_key=await get_token('google'))
+    client = GenerativeModel(model, api_key=get_token('google'))
     
     response = await client.generate_content(
         message,
@@ -151,7 +151,7 @@ async def deepseek_chat(message: str, *, system: str = None, model: str = None,
                        stream: bool = True, **kwargs) -> str:
     """Deepseek chat completion"""
     client = openai.OpenAI(
-        api_key=await get_token('deepseek'),
+        api_key=get_token('deepseek'),
         base_url="https://api.deepseek.com/v1"
     )
     
@@ -160,7 +160,7 @@ async def deepseek_chat(message: str, *, system: str = None, model: str = None,
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": message})
     
-    response = await client.chat.completions.create(
+    response = client.chat.completions.create(
         model="deepseek-chat",
         messages=messages,
         temperature=temperature,
@@ -184,7 +184,7 @@ async def meta_chat(message: str, *, system: str = None, model: str = None,
                    stream: bool = True, **kwargs) -> str:
     """Meta/Llama chat completion via OpenRouter"""
     client = openai.OpenAI(
-        api_key=await get_token('openrouter'),
+        api_key=get_token('openrouter'),
         base_url="https://openrouter.ai/api/v1"
     )
     

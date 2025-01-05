@@ -1,0 +1,22 @@
+#!/bin/sh
+
+CURRENT_WD="$(pwd)"
+PARENT_DIR="/tmp"
+AOE_DIR="$PARENT_DIR/aoe"
+AOE_BIN="$AOE_DIR/.venv/bin/python"
+
+if [ ! -d "$AOE_DIR" ]; then
+    echo "Installing AOE dependencies."
+    cd "$PARENT_DIR"
+    mkdir -p aoe
+    cd aoe/
+    python -m venv .venv
+    . .venv/bin/activate
+    .venv/bin/pip install openai anthropic google-generativeai aiohttp
+else
+    . "$AOE_DIR/.venv/bin/activate"
+fi
+cd "$CURRENT_WD"
+
+# Finally run the command.
+_aoe "$@"
