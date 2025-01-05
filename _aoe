@@ -41,13 +41,28 @@ MODELS = {
 }
 
 async def get_token(vendor: str) -> str:
-    """Read API token from config file"""
+    """Get API token from environment variable or config file"""
+    env_vars = {
+        'openai': 'OPENAI_API_KEY',
+        'anthropic': 'ANTHROPIC_API_KEY',
+        'google': 'GOOGLE_API_KEY',
+        'deepseek': 'DEEPSEEK_API_KEY',
+        'openrouter': 'OPENROUTER_API_KEY'
+    }
+    
+    # Check environment variable first
+    if vendor in env_vars:
+        token = os.getenv(env_vars[vendor])
+        if token:
+            return token
+    
+    # Fallback to config file
     token_path = os.path.join(os.path.expanduser('~'), '.config', f'{vendor}.token')
     try:
         with open(token_path) as f:
             return f.read().strip()
     except Exception as e:
-        print(f"Error reading {vendor}.token file:", e, file=sys.stderr)
+        print(f"Error: Could not get {vendor} API token from environment or config file", file=sys.stderr)
         sys.exit(1)
 
 async def openai_chat(message: str, *, system: str = None, model: str = None,
@@ -131,6 +146,75 @@ async def gemini_chat(message: str, *, system: str = None, model: str = None,
         
     return result
 
+async def deepseek_chat(message: str, *, system: str = None, model: str = None,
+                       temperature: float = 0.0, max_tokens: int = 8192,
+                       stream: bool = True, **kwargs) -> str:
+    """Deepseek chat completion"""
+    client = openai.OpenAI(
+        api_key=await get_token('deepseek'),
+        base_url="https://api.deepseek.com/v1"
+    )
+    
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": message})
+    
+    response = await client.chat.completions.create(
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        stream=stream
+    )
+    
+    result = ""
+    if stream:
+        async for chunk in response:
+            text = chunk.choices[0].delta.content or ""
+            print(text, end="", flush=True)
+            result += text
+    else:
+        result = response.choices[0].message.content
+        
+    return result
+
+async def meta_chat(message: str, *, system: str = None, model: str = None,
+                   temperature: float = 0.0, max_tokens: int = 8192,
+                   stream: bool = True, **kwargs) -> str:
+    """Meta/Llama chat completion via OpenRouter"""
+    client = openai.OpenAI(
+        api_key=await get_token('openrouter'),
+        base_url="https://openrouter.ai/api/v1"
+    )
+    
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": message})
+    
+    response = await client.chat.completions.create(
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        stream=stream,
+        headers={
+            "HTTP-Referer": "https://github.com/OpenRouterTeam/openrouter-examples"
+        }
+    )
+    
+    result = ""
+    if stream:
+        async for chunk in response:
+            text = chunk.choices[0].delta.content or ""
+            print(text, end="", flush=True)
+            result += text
+    else:
+        result = response.choices[0].message.content
+        
+    return result
+
 async def chat(model: str) -> Callable:
     """Factory function to create chat completion function based on model"""
     model = MODELS.get(model, model)
@@ -142,9 +226,9 @@ async def chat(model: str) -> Callable:
     elif model.startswith('gemini'):
         return gemini_chat
     elif model.startswith('deepseek'):
-        return openai_chat  # Deepseek uses OpenAI's API format
+        return deepseek_chat
     elif model.startswith('meta'):
-        return openai_chat  # Meta/Llama uses OpenAI's API format through OpenRouter
+        return meta_chat
     else:
         raise ValueError(f"Unsupported model: {model}")
 
