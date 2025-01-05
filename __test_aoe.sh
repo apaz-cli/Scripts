@@ -14,9 +14,8 @@ cd "$TEST_DIR" || handle_error "Failed to change to temp directory"
 
 echo "Using test directory: $TEST_DIR"
 
-# Copy aoe scripts to test directory
-cp ../aoe ../_aoe . || handle_error "Failed to copy aoe scripts"
-chmod +x aoe _aoe || handle_error "Failed to make scripts executable"
+# Verify aoe is available
+command -v aoe >/dev/null 2>&1 || handle_error "aoe command not found in PATH"
 
 # Create test files and directories
 mkdir -p src/nested || handle_error "Failed to create test folders"
