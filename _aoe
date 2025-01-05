@@ -386,11 +386,8 @@ async def process_chunks(chunks: List[CodeChunk], query: str, picker_model: str)
     message = PICKER_MESSAGE(codebase, chunks_text, query)
     system = PICKER_SYSTEM(codebase, chunks_text, query)
     
-    response = await chat(picker_model)(message, {
-        'system': system,
-        'system_cacheable': True,
-        'stream': False
-    })
+    chat_func = await chat(picker_model)
+    response = await chat_func(message, system=system, system_cacheable=True, stream=False)
     
     try:
         import re
@@ -540,11 +537,8 @@ async def edit_chunks(chunks_to_edit: List[CodeChunk], query: str, editor_model:
     message = EDITOR_MESSAGE(codebase, chunks_text, query)
     print("\x1b[1m# Editing the selected blocks...\x1b[0m")
     
-    response = await chat(editor_model)(message, {
-        'system': EDITOR_SYSTEM,
-        'system_cacheable': True,
-        'stream': True
-    })
+    chat_func = await chat(editor_model)
+    response = await chat_func(message, system=EDITOR_SYSTEM, system_cacheable=True, stream=True)
     
     import re
     refactored_chunks = {}
