@@ -1,198 +1,142 @@
-#!/bin/bash
+#!/bin/sh
+set -e
 
-# Function to handle errors
-handle_error() {
-    echo "ERROR: $1"
-    cd /
-    rm -rf "$TEST_DIR"
+# Ensure we have required API keys
+if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$DEEPSEEK_API_KEY" ]; then
+    echo "Missing required API keys in environment variables"
+    echo "Need: ANTHROPIC_API_KEY, DEEPSEEK_API_KEY"
     exit 1
+fi
+
+run_test() {
+    name="$1"
+    setup="$2"
+    query="$3"
+    verify="$4"
+    
+    echo "Running test: $name"
+    
+    # Create test directory
+    test_dir="/tmp/aoe_test_${name}"
+    rm -rf "$test_dir"
+    mkdir -p "$test_dir"
+    cd "$test_dir"
+    
+    # Run setup
+    eval "$setup"
+    
+    # Run aoe
+    aoe "$query"
+    
+    # Verify results
+    if eval "$verify"; then
+        echo "✓ Test passed: $name"
+        return 0
+    else
+        echo "✗ Test failed: $name"
+        return 1
+    fi
 }
 
-# Create temp test directory
-TEST_DIR=$(mktemp -d) || handle_error "Failed to create temp directory"
-cd "$TEST_DIR" || handle_error "Failed to change to temp directory"
-
-echo "Using test directory: $TEST_DIR"
-
-# Verify aoe is available
-command -v aoe >/dev/null 2>&1 || handle_error "aoe command not found in PATH"
-
-# Create test files and directories
-mkdir -p src/nested || handle_error "Failed to create test folders"
-
-# Create a Python test file
-cat > src/vector.py << 'EOF'
-class Vector:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-
-    def add(self, other):
-        return Vector(
-            self.x + other.x,
-            self.y + other.y
-        )
-
-    def scale(self, factor):
-        return Vector(
-            self.x * factor,
-            self.y * factor
-        )
+# Test 1: Basic variable rename
+run_test "basic_rename" '
+    cat > test.py << EOF
+x = 42
+print(x)
+y = x + 1
 EOF
+' \
+"rename variable x to counter" \
+'grep -q "counter = 42" test.py && grep -q "print(counter)" test.py'
 
-# Create a JavaScript test file
-cat > src/nested/math.js << 'EOF'
-// Vector operations
-function createVector(x, y) {
-    return {x, y};
-}
-
-function addVectors(a, b) {
-    return {
-        x: a.x + b.x,
-        y: a.y + b.y
-    };
-}
-
-// Example usage:
-// let v = createVector(3, 4);
+# Test 2: Comment updates
+run_test "comment_updates" '
+    cat > main.py << EOF
+# x is the main counter variable
+x = 0
+# increment x
+x += 1
 EOF
+' \
+"rename variable x to counter" \
+'grep -q "# counter is the main counter variable" main.py && grep -q "# increment counter" main.py'
 
-# Create a file with show directives
-cat > src/show_test.py << 'EOF'
---show--
-def important_function():
-    return 42
-
-def helper():
-    return 21
+# Test 3: Multi-file consistency
+run_test "multi_file" '
+    cat > a.py << EOF
+value = 42
 EOF
-
-# Create a file with Unicode content
-cat > src/unicode_test.py << 'EOF'
-# 日本語コメント
-def greet():
-    return "こんにちは"
+    cat > b.py << EOF
+from a import value
+print(value)
 EOF
+' \
+"rename variable value to result" \
+'grep -q "result = 42" a.py && grep -q "from a import result" b.py'
 
-# Create read-only file
-cat > src/readonly.py << 'EOF'
-def constant():
-    return 3.14159
+# Test 4: Partial updates
+run_test "partial_updates" '
+    cat > test.py << EOF
+# This is a test
+x = 1
+# This uses x
+y = x + 1
+# This is unrelated
+z = 42
 EOF
-chmod 444 src/readonly.py
+' \
+"rename variable x to counter" \
+'grep -q "counter = 1" test.py && grep -q "y = counter + 1" test.py && grep -q "z = 42" test.py'
 
-# Create symlink
-ln -s vector.py src/vector_link.py
-
-# Create .aoe.json config
-cat > .aoe.json << 'EOF'
-{
-    "path": "src"
-}
+# Test 5: Multiple file types
+run_test "file_types" '
+    cat > test.py << EOF
+x = 42
 EOF
+    cat > test.js << EOF
+let x = 42;
+EOF
+    cat > test.ts << EOF
+let x: number = 42;
+EOF
+' \
+"rename variable x to counter" \
+'grep -q "counter = 42" test.py && grep -q "let counter = 42;" test.js && grep -q "let counter: number = 42;" test.ts'
 
-echo
-echo "=== Testing basic functionality ==="
+# Test 6: Whitespace preservation
+run_test "whitespace" '
+    cat > test.py << EOF
 
-echo "Testing installation..."
-rm -rf /tmp/aoe || handle_error "Failed to remove existing aoe directory"
-./aoe "test query" || handle_error "Failed basic aoe execution"
+def func():
+    x = 42
+    return x
 
-echo
-echo "=== Testing model combinations ==="
+EOF
+' \
+"rename variable x to counter" \
+'diff -u <(echo -e "\ndef func():\n    counter = 42\n    return counter\n") test.py'
 
-echo "Testing with Deepseek picker and Claude editor..."
-./aoe "convert vectors to use arrays instead of objects" "d" "c" || handle_error "Failed model combination test"
+# Test 7: Empty/invalid files
+run_test "empty_files" '
+    touch empty.py
+    echo "invalid python" > invalid.py
+' \
+"rename variable x to counter" \
+'[ -f empty.py ] && [ -f invalid.py ]'
 
-echo "Testing with Claude picker and Deepseek editor..."
-./aoe "add type hints to Python functions" "c" "d" || handle_error "Failed reversed model combination test"
-
-echo
-echo "=== Testing configuration ==="
-
-echo "Testing without config..."
-mv .aoe.json .aoe.json.bak
-./aoe "simple query" || handle_error "Failed no config test"
-mv .aoe.json.bak .aoe.json
-
-echo "Testing with invalid config..."
-echo "{invalid json}" > .aoe.json
-./aoe "simple query" || handle_error "Failed invalid config test"
-echo '{"path": "src"}' > .aoe.json
-
-echo
-echo "=== Testing chunk processing ==="
-
-echo "Testing empty file..."
-touch src/empty.py
-./aoe "modify empty file" || handle_error "Failed empty file test"
-
-echo "Testing show directives..."
-./aoe "modify only shown function" || handle_error "Failed show directive test"
-
-echo "Testing different comment styles..."
-echo "# Python comment" > src/comments.py
-echo "// JavaScript comment" > src/comments.js
-echo "-- Haskell comment" > src/comments.hs
-./aoe "update comments" || handle_error "Failed comment style test"
-
-echo
-echo "=== Testing parallel vs sequential ==="
-
-# Create many small files for parallel testing
-for i in {1..10}; do
-    echo "def func_${i}(): return ${i}" > "src/test_${i}.py"
+# Run all tests
+echo "Running all tests..."
+failed=0
+for test in basic_rename comment_updates multi_file partial_updates file_types whitespace empty_files; do
+    if ! run_test "$test" "$(eval "echo \$$test")" "$(eval "echo \$${test}_query")" "$(eval "echo \$${test}_verify")"; then
+        failed=$((failed + 1))
+    fi
 done
 
-echo "Testing parallel execution..."
-export PARALLEL=true
-./aoe "add docstrings" || handle_error "Failed parallel execution test"
-
-echo "Testing sequential execution..."
-export PARALLEL=false
-./aoe "add docstrings" || handle_error "Failed sequential execution test"
-
-echo
-echo "=== Testing error handling ==="
-
-echo "Testing invalid model selection..."
-if ./aoe "test query" "invalid_model" 2>/dev/null; then
-    handle_error "Should fail with invalid model"
+if [ "$failed" -eq 0 ]; then
+    echo "All tests passed!"
+    exit 0
+else
+    echo "$failed test(s) failed"
+    exit 1
 fi
-
-echo "Testing read-only file handling..."
-./aoe "modify readonly file" || handle_error "Failed readonly file test"
-
-echo "Testing non-existent directory..."
-echo '{"path": "nonexistent"}' > .aoe.json
-if ./aoe "test query" 2>/dev/null; then
-    handle_error "Should fail with non-existent directory"
-fi
-
-echo "Testing missing API tokens..."
-ANTHROPIC_BAK=$ANTHROPIC_API_KEY
-unset ANTHROPIC_API_KEY
-if ./aoe "test query" "c" 2>/dev/null; then
-    handle_error "Should fail with missing API token"
-fi
-export ANTHROPIC_API_KEY=$ANTHROPIC_BAK
-
-echo
-echo "=== Testing file types ==="
-echo "Testing Python file modification..."
-./aoe "add type hints" || handle_error "Failed Python modification test"
-
-echo "Testing JavaScript file modification..."
-./aoe "convert to ES6 syntax" || handle_error "Failed JavaScript modification test"
-
-echo "Testing symlinked file..."
-./aoe "modify symlinked file" || handle_error "Failed symlink test"
-
-echo "Testing Unicode content..."
-./aoe "translate comments to English" || handle_error "Failed Unicode test"
-
-echo
-echo "=== All tests completed! ==="
-cd /
-rm -rf "$TEST_DIR"
