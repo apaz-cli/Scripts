@@ -1,15 +1,16 @@
 #!/bin/sh
 
+ENV_NAME="pytorchenv"
 CURRENT_WD="$(pwd)"
-TORCH_DIR="/tmp/torchenv"
+TORCH_DIR="/tmp/$ENV_NAME"
 
 if [ ! -d "$TORCH_DIR" ]; then
     echo "Building venv."
     cd /tmp
-    mkdir torchenv/
-    cd torchenv/
+    mkdir "$ENV_NAME"
+    cd "$ENV_NAME"
     python -m venv .venv
-    .venv/bin/pip install torch numpy
+    .venv/bin/pip install torch numpy ipython
 fi
 
 TMPF="/tmp/__import_torch__.py"
@@ -17,6 +18,6 @@ echo "import torch;from torch import tensor" > $TMPF
 
 cd "$CURRENT_WD"
 
-/tmp/torchenv/.venv/bin/python -i "$TMPF" "$@"
+"/tmp/$ENV_NAME/.venv/bin/ipython" -i "$TMPF" "$@"
 
 
