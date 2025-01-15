@@ -1,0 +1,38 @@
+#!/bin/sh
+
+# Try common history file locations
+for HISTFILE in \
+    "$HISTFILE" \
+    "$HOME/.sh_history" \
+    "$HOME/.history" \
+    "$HOME/.bash_history" \
+    "$HOME/.*_history"
+do
+    [ -f "$HISTFILE" ] && break
+done
+
+if [ ! -f "$HISTFILE" ]; then
+    echo "History file not found"
+    exit 1
+fi
+
+# Use sed to read file backwards and find last ssh command
+# More portable than tac/tail -r
+last_ssh=$(sed '1!G;h;$!d' "$HISTFILE" | sed -n '/^ssh /p' | sed -n '1p')
+
+if [ -z "$last_ssh" ]; then
+    echo "No SSH command found in history"
+    exit 1
+fi
+
+# Show the command and ask for confirmation
+echo "Last SSH command was:"
+echo "$last_ssh"
+printf "Do you want to run this command? [y/N] "
+read answer
+
+# Use case instead of bash-specific regex
+case "$answer" in
+    [Yy]) eval "$last_ssh" ;;
+    *) echo "Command cancelled" ;;
+esac
