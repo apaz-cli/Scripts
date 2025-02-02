@@ -27,7 +27,6 @@ fi
 nano -Sa0 "$REPOS_DIR/Secrets/secrets/TODO"
 
 # Prompt if the user wants to commit the changes.
-# Prompt if the user wants to commit the changes
 echo "Commit changes? [y/N]:"
 read -r commit
 if [ "$commit" = "Y" ] || [ "$commit" = "y" ]; then

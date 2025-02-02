@@ -1,7 +1,12 @@
 #!/bin/sh
 
-echo "cd ~ && curl -sSL https://apaz.dev/setup | PRIME=1 sh"
+echo "curl -sSL https://apaz.dev/setup | PRIME=1 sh"
+echo
 echo "cd prime/"
 echo ". .venv/bin/activate"
 echo "export LD_LIBRARY_PATH=\$(python -c \"import site; print(site.getsitepackages()[0] + '/nvidia/nvjitlink/lib')\"):\$LD_LIBRARY_PATH"
+echo "huggingface-cli login --token $HF_TOKEN"
+echo "wandb login $WANDB_KEY"
+echo
+echo "./scripts/simulate_multi_node_diloco.sh 1 8 src/zeroband/train.py @ configs/10B/H100_devel.toml"
 echo

@@ -16,6 +16,7 @@ if [ "$CLONED" = "true" ]; then
   bin/python setup.py install #>/dev/null 2>&1
 fi
 
+. bin/activate
 reset
 bin/hyfetch "$@"
 cd "$WD"

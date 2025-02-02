@@ -1,0 +1,5 @@
+#!/bin/sh
+
+# Open my notes.
+
+wnano ~/Documents/NOTES
