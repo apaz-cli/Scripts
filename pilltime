@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+from datetime import datetime, timedelta, time
+
+def parse_time(input_str):
+    """Parse time from string with optional AM/PM"""
+    try:
+        return datetime.strptime(input_str, "%I:%M %p").time()
+    except ValueError:
+        try:
+            return datetime.strptime(input_str, "%H:%M").time()
+        except ValueError:
+            return None
+
+# Get wake-up time
+wake_up_time = None
+while wake_up_time is None:
+    wake_input = input("Wake-up time (HH:MM or HH:MM AM/PM) [Enter for now]: ").strip()
+    if not wake_input:
+        wake_up_time = datetime.now()
+        break
+
+    parsed_time = parse_time(wake_input)
+    if parsed_time:
+        # Combine with current date
+        wake_up_time = datetime.combine(datetime.today(), parsed_time)
+        break
+    print("Invalid format. Use HH:MM or HH:MM AM/PM (e.g., 08:00 AM or 20:00)")
+
+# Get bedtime
+bedtime = None
+while bedtime is None:
+    bed_input = input("Bedtime (HH:MM or HH:MM AM/PM): ").strip()
+    parsed_time = parse_time(bed_input)
+    if parsed_time:
+        bedtime = datetime.combine(wake_up_time.date(), parsed_time)
+        # Handle next-day bedtime
+        if bedtime <= wake_up_time:
+            bedtime += timedelta(days=1)
+        break
+    print("Invalid format. Use HH:MM or HH:MM AM/PM (e.g., 10:30 PM or 22:30)")
+
+# Calculate middle time
+total_duration = bedtime - wake_up_time
+middle_time = wake_up_time + total_duration / 2
+
+# Display results
+print(f"\nPill Schedule:")
+print(f"1. Morning:   {wake_up_time.strftime('%I:%M %p')}")
+print(f"2. Afternoon: {middle_time.strftime('%I:%M %p')}")
+print(f"3. Evening:   {bedtime.strftime('%I:%M %p')}")
+print(f"\nTime between doses: {total_duration/2}")
