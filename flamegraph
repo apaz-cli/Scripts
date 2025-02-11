@@ -69,5 +69,15 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-# Open the flamegraph in firefox
-firefox "$SVG"
+# Try to open in Firefox, otherwise copy to working directory with incremented number
+if command -v firefox >/dev/null 2>&1; then
+    firefox "$SVG"
+else
+    WD="$(pwd)"
+    i=1
+    while [ -f "$WD/flamegraph_$i.svg" ]; do
+        i=$((i + 1))
+    done
+    cp "$SVG" "$WD/flamegraph_$i.svg"
+    echo "Saved flamegraph to: flamegraph_$i.svg"
+fi
