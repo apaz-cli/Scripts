@@ -15,8 +15,10 @@ cd "$INSTALL_DIR"
 if [ "$CLONED" = "true" ]; then
   bin/python setup.py install #>/dev/null 2>&1
 fi
-
 . bin/activate
+
 reset
-bin/hyfetch "$@"
-cd "$WD"
+
+# Run it under script to prevent it from realizing it's being piped.
+# Then strip the dumbass warning they put on it.
+script -qc bin/hyfetch "$@" /dev/null | grep --color=always -v "The rust executable is not found, falling back to python..."

@@ -4,7 +4,7 @@
 # This wrapper exists literally so that I don't have to pass the . and type -m manually, or type activate manually.
 
 if [ $# -eq 0 ]; then
-    _VENVNAME="."
+    _VENVNAME=".venv/"
 else
     _VENVNAME="$1"
     shift

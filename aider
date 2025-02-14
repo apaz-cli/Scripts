@@ -13,7 +13,7 @@ if [ ! -d "$AIDER_DIR" ]; then
     python -m venv .venv
     . .venv/bin/activate
     .venv/bin/pip install -e .
-    .venv/bin/pip install --upgrade --upgrade-strategy only-if-needed 'aider-chat[browser]'
+    # .venv/bin/pip install --upgrade --upgrade-strategy only-if-needed 'aider-chat[browser]'
     .venv/bin/pip install --upgrade --upgrade-strategy only-if-needed 'aider-chat[playwright]'
     .venv/bin/python3 -m playwright install --with-deps chromium
 fi
