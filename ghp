@@ -4,4 +4,4 @@
 # In the future, this will be stored with secrets.
 
 GHP="/home/$USER/git/ghp"
-if [ -f "$GHP" ]; then cat "$GHP"; xclip "$GHP"; fi
+if [ -f "$GHP" ]; then cat "$GHP"; fi

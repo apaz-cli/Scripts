@@ -1,6 +1,7 @@
 #!/bin/sh
 
 echo "curl -sSL https://apaz.dev/setup | PRIME=1 sh"
+echo "$(ghp)"
 echo
 echo "cd prime/"
 echo ". .venv/bin/activate"
