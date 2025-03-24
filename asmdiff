@@ -16,6 +16,7 @@ import datetime
 import signal
 import glob
 from pathlib import Path
+from typing import List, Optional, Union, Any, Dict, Tuple
 
 
 # Default settings - can be overridden by environment variables
@@ -31,13 +32,13 @@ DEFAULT_GCC_CPP_CMD.insert(0, os.environ.get("ASMDIFF_GCC_CPP", "g++"))
 DEFAULT_DISASM_CMD = os.environ.get("ASMDIFF_DISASM_CMD", "objdump -d -S").split()
 
 
-def log_verbose(message, verbose=False):
+def log_verbose(message: str, verbose: bool = False) -> None:
     """Log a verbose message if verbose mode is enabled."""
     if verbose:
         print(f"\033[0;34m[INFO] {message}\033[0m")
 
 
-def detect_compiler(file_path, compiler_type="clang"):
+def detect_compiler(file_path: str, compiler_type: str = "clang") -> list[str]:
     """Detect the appropriate compiler command based on file extension."""
     file_ext = os.path.splitext(file_path)[1].lower()
 
@@ -53,9 +54,10 @@ def detect_compiler(file_path, compiler_type="clang"):
             return DEFAULT_GCC_C_CMD.copy()
 
 
-def compile_to_asm(source_path, output_path, build_script=None, build_args=None, 
-                   input_path=None, output_asm=None, is_directory=False, compiler_type="clang",
-                   verbose=False):
+def compile_to_asm(source_path: str, output_path: str, build_script: str = None, 
+                   build_args: str = None, input_path: str = None, output_asm: str = None, 
+                   is_directory: bool = False, compiler_type: str = "clang",
+                   verbose: bool = False) -> bool:
     """Compile source file to assembly."""
     if build_script:
         log_verbose(f"Using build script: {build_script} {build_args}", verbose)
@@ -146,7 +148,8 @@ def compile_to_asm(source_path, output_path, build_script=None, build_args=None,
     return True
 
 
-def disassemble_to_asm(binary_path, output_path, disasm_args=None, verbose=False):
+def disassemble_to_asm(binary_path: str, output_path: str, 
+                       disasm_args: str = None, verbose: bool = False) -> bool:
     """Disassemble binary file to assembly."""
     disasm_cmd = DEFAULT_DISASM_CMD.copy()
     if disasm_args:
@@ -164,18 +167,18 @@ def disassemble_to_asm(binary_path, output_path, disasm_args=None, verbose=False
     return True
 
 
-def ensure_dir(directory):
+def ensure_dir(directory: str) -> None:
     """Ensure a directory exists, creating it if necessary."""
     os.makedirs(directory, exist_ok=True)
 
 
-def signal_handler(sig, frame):
+def signal_handler(sig: int, frame) -> None:
     """Handle Ctrl+C gracefully."""
     print("\033[0;33m\nExiting...\033[0m")
     sys.exit(0)
 
 
-def main():
+def main() -> int:
     """Main entry point for the script."""
     parser = argparse.ArgumentParser(
         description="Interactive Assembly Diff Tool",
