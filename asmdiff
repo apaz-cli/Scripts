@@ -22,11 +22,15 @@ from typing import List, Optional, Union, Any, Dict, Tuple
 # Default settings - can be overridden by environment variables
 BASE_TMP_DIR = os.environ.get("ASMDIFF_TMP_DIR", "/tmp/asmdiff")
 
+# Default compiler flags (shared across all compilers)
+DEFAULT_COMPILER_FLAGS = ["-S", "-O3", "-march=skylake", "-mavx512f"]
+DEFAULT_LINKER_FLAGS = ["-lm", "-lpthread"]
+
 # Default compiler commands
-DEFAULT_CLANG_C_CMD = ["clang", "-S", "-O3", "-march=skylake", "-mavx512f"]
-DEFAULT_CLANG_CPP_CMD = ["clang++", "-S", "-O3", "-march=skylake", "-mavx512f"]
-DEFAULT_GCC_C_CMD = ["gcc", "-S", "-O3", "-march=skylake", "-mavx512f"]
-DEFAULT_GCC_CPP_CMD = ["g++", "-S", "-O3", "-march=skylake", "-mavx512f"]
+DEFAULT_CLANG_C_CMD = ["clang"] + DEFAULT_COMPILER_FLAGS
+DEFAULT_CLANG_CPP_CMD = ["clang++"] + DEFAULT_COMPILER_FLAGS
+DEFAULT_GCC_C_CMD = ["gcc"] + DEFAULT_COMPILER_FLAGS
+DEFAULT_GCC_CPP_CMD = ["g++"] + DEFAULT_COMPILER_FLAGS
 
 # Add additional flags from environment if specified
 if "ASMDIFF_CFLAGS" in os.environ:
@@ -35,6 +39,12 @@ if "ASMDIFF_CFLAGS" in os.environ:
     DEFAULT_CLANG_CPP_CMD.extend(additional_flags)
     DEFAULT_GCC_C_CMD.extend(additional_flags)
     DEFAULT_GCC_CPP_CMD.extend(additional_flags)
+
+# Add linker flags
+DEFAULT_CLANG_C_CMD.extend(DEFAULT_LINKER_FLAGS)
+DEFAULT_CLANG_CPP_CMD.extend(DEFAULT_LINKER_FLAGS)
+DEFAULT_GCC_C_CMD.extend(DEFAULT_LINKER_FLAGS)
+DEFAULT_GCC_CPP_CMD.extend(DEFAULT_LINKER_FLAGS)
 
 DEFAULT_DISASM_CMD = os.environ.get("ASMDIFF_DISASM_CMD", "objdump -d -S").split()
 
@@ -218,6 +228,8 @@ Environment Variables:
   ASMDIFF_COMPILER        Compiler to use: 'clang' or 'gcc'
   ASMDIFF_OUTPUT          Output assembly file path
   ASMDIFF_CFLAGS          Additional compiler flags for all compilers
+  
+Default compiler flags: -S -O3 -march=skylake -mavx512f -lm -lpthread
   ASMDIFF_DISASM_CMD      Disassembly command and flags
 """
     )
