@@ -1,0 +1,424 @@
+#!/usr/bin/env python3
+"""
+interactive-asm-diff.py - Interactive Assembly Diff Tool
+
+A script to interactively compare assembly output between modifications of source or binary files
+with structured session management.
+"""
+
+import argparse
+import os
+import sys
+import subprocess
+import tempfile
+import shutil
+import datetime
+import signal
+import glob
+from pathlib import Path
+
+
+# Default settings
+BASE_TMP_DIR = "/tmp/asmdiff"
+DEFAULT_CLANG_C_CMD = ["clang", "-S", "-O3", "-march=skylake", "-mavx512f"]
+DEFAULT_CLANG_CPP_CMD = ["clang++", "-S", "-O3", "-march=skylake", "-mavx512f"]
+DEFAULT_GCC_C_CMD = ["gcc", "-S", "-O3", "-march=skylake", "-mavx512f"]
+DEFAULT_GCC_CPP_CMD = ["g++", "-S", "-O3", "-march=skylake", "-mavx512f"]
+DEFAULT_DISASM_CMD = ["objdump", "-d", "-S"]
+
+
+def log_verbose(message, verbose=False):
+    """Log a verbose message if verbose mode is enabled."""
+    if verbose:
+        print(f"\033[0;34m[INFO] {message}\033[0m")
+
+
+def detect_compiler(file_path, compiler_type="clang"):
+    """Detect the appropriate compiler command based on file extension."""
+    file_ext = os.path.splitext(file_path)[1].lower()
+
+    if file_ext in (".cpp", ".cc", ".cxx", ".c++"):
+        if compiler_type == "clang":
+            return DEFAULT_CLANG_CPP_CMD.copy()
+        else:
+            return DEFAULT_GCC_CPP_CMD.copy()
+    else:
+        if compiler_type == "clang":
+            return DEFAULT_CLANG_C_CMD.copy()
+        else:
+            return DEFAULT_GCC_C_CMD.copy()
+
+
+def compile_to_asm(source_path, output_path, build_script=None, build_args=None, 
+                   input_path=None, output_asm=None, is_directory=False, compiler_type="clang",
+                   verbose=False):
+    """Compile source file to assembly."""
+    if build_script:
+        log_verbose(f"Using build script: {build_script} {build_args}", verbose)
+
+        # Create workspace directory
+        work_dir = os.path.join(os.path.dirname(output_path), "workspace")
+        if os.path.exists(work_dir):
+            shutil.rmtree(work_dir)
+        os.makedirs(work_dir)
+
+        # Copy source files to workspace
+        if is_directory:
+            # Copy directory contents
+            for item in os.listdir(input_path):
+                src_item = os.path.join(input_path, item)
+                dst_item = os.path.join(work_dir, item)
+                if os.path.isdir(src_item):
+                    shutil.copytree(src_item, dst_item)
+                else:
+                    shutil.copy2(src_item, dst_item)
+            log_verbose(f"Copied directory contents to {work_dir}", verbose)
+        else:
+            # Copy single file
+            shutil.copy2(input_path, os.path.join(work_dir, os.path.basename(input_path)))
+            log_verbose(f"Copied file to {work_dir}/{os.path.basename(input_path)}", verbose)
+
+        # Determine output path for assembly
+        if output_asm:
+            if os.path.isabs(output_asm):
+                output_asm_path = output_asm
+            else:
+                output_asm_path = os.path.join(work_dir, output_asm)
+            log_verbose(f"Expecting build script to generate assembly at: {output_asm_path}", verbose)
+
+        # Execute build script
+        cmd = [build_script]
+        if build_args:
+            cmd.extend(build_args.split())
+
+        try:
+            # Execute in the workspace directory
+            cwd = os.getcwd()
+            os.chdir(work_dir)
+            subprocess.run(cmd, check=True)
+            os.chdir(cwd)
+        except subprocess.CalledProcessError as e:
+            print(f"\033[0;31mError: Build script failed with exit code {e.returncode}\033[0m")
+            return False
+
+        # Check for output assembly file
+        if output_asm:
+            if os.path.exists(output_asm_path):
+                shutil.copy2(output_asm_path, output_path)
+            else:
+                print(f"\033[0;31mError: Build script did not produce the specified output file: {output_asm_path}\033[0m")
+                return False
+        else:
+            # Try to find any .s files produced by the build
+            s_files = glob.glob(os.path.join(work_dir, "**", "*.s"), recursive=True)
+            if s_files:
+                shutil.copy2(s_files[0], output_path)
+                log_verbose(f"Found and used assembly file: {s_files[0]}", verbose)
+            else:
+                print("\033[0;31mError: Build script did not produce any .s files\033[0m")
+                print("\033[0;33mHint: Use -o to specify the expected output file path\033[0m")
+                return False
+    else:
+        # Use compiler directly
+        compile_cmd = detect_compiler(source_path, compiler_type)
+        compile_cmd.extend([source_path, "-o", output_path])
+        log_verbose(f"Using compiler: {' '.join(compile_cmd)}", verbose)
+
+        try:
+            subprocess.run(compile_cmd, check=True)
+        except subprocess.CalledProcessError:
+            print("\033[0;31mError: Compilation failed\033[0m")
+            return False
+
+    return True
+
+
+def disassemble_to_asm(binary_path, output_path, disasm_args=None, verbose=False):
+    """Disassemble binary file to assembly."""
+    disasm_cmd = DEFAULT_DISASM_CMD.copy()
+    if disasm_args:
+        disasm_cmd.extend(disasm_args.split())
+
+    log_verbose(f"Disassembling: {' '.join(disasm_cmd)} {binary_path} > {output_path}", verbose)
+
+    try:
+        with open(output_path, 'w') as f:
+            subprocess.run(disasm_cmd + [binary_path], stdout=f, check=True)
+    except subprocess.CalledProcessError:
+        print("\033[0;31mError: Disassembly failed\033[0m")
+        return False
+
+    return True
+
+
+def ensure_dir(directory):
+    """Ensure a directory exists, creating it if necessary."""
+    os.makedirs(directory, exist_ok=True)
+
+
+def signal_handler(sig, frame):
+    """Handle Ctrl+C gracefully."""
+    print("\033[0;33m\nExiting...\033[0m")
+    sys.exit(0)
+
+
+def main():
+    """Main entry point for the script."""
+    parser = argparse.ArgumentParser(description="Interactive Assembly Diff Tool")
+    parser.add_argument("input_path", help="Input file or directory")
+    parser.add_argument("-m", "--mode", choices=["source", "binary"], default="source",
+                        help="Set mode: 'source' (default) or 'binary'")
+    parser.add_argument("-b", "--build", help="Use custom build script instead of default compiler")
+    parser.add_argument("-a", "--args", help="Pass arguments to build script")
+    parser.add_argument("-s", "--session", help="Set custom session name (default: auto-generated)")
+    parser.add_argument("-f", "--file", help="Specify path to track when using build script")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
+    parser.add_argument("-c", "--compiler", choices=["clang", "gcc"], default="clang",
+                        help="Compiler to use (default: clang)")
+    parser.add_argument("-o", "--output", help="Specify output assembly file path")
+
+    args = parser.parse_args()
+
+    # Resolve paths to absolute
+    input_path = os.path.abspath(args.input_path)
+    file_to_track = args.file
+
+    # Check if input is a directory or file
+    is_directory = os.path.isdir(input_path)
+
+    if is_directory:
+        if not file_to_track and args.mode == "source":
+            print(f"\033[0;31mError: When specifying a directory with a build script, "
+                 f"you must use -f to specify which file to track\033[0m")
+            return 1
+    else:
+        # Check if the input file exists
+        if not os.path.isfile(input_path):
+            print(f"\033[0;31mError: Input file {input_path} does not exist\033[0m")
+            return 1
+
+        # If file to track is not specified, use the input file
+        if not file_to_track:
+            file_to_track = input_path
+
+    # Resolve file_to_track to absolute path
+    if file_to_track:
+        if not os.path.isabs(file_to_track):
+            if is_directory and os.path.isfile(os.path.join(input_path, file_to_track)):
+                file_to_track = os.path.join(input_path, file_to_track)
+            else:
+                file_to_track = os.path.abspath(file_to_track)
+
+    # Setup session directory
+    ensure_dir(BASE_TMP_DIR)
+
+    # Generate session name
+    if not args.session:
+        base_name = os.path.basename(file_to_track)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        session_name = f"{base_name}_{timestamp}"
+    else:
+        session_name = args.session
+
+    # Find the next available session number
+    next_session = 1
+    while os.path.exists(os.path.join(BASE_TMP_DIR, f"session_{next_session}_{session_name}")):
+        next_session += 1
+
+    session_dir = os.path.join(BASE_TMP_DIR, f"session_{next_session}_{session_name}")
+    ensure_dir(session_dir)
+    ensure_dir(os.path.join(session_dir, "binaries"))
+    ensure_dir(os.path.join(session_dir, "assembly"))
+
+    log_verbose(f"Created session directory: {session_dir}", args.verbose)
+
+    # Save metadata about this session
+    with open(os.path.join(session_dir, "session_info.txt"), 'w') as f:
+        f.write(f"Session ID: {next_session}\n")
+        f.write(f"Session Name: {session_name}\n")
+        f.write(f"Created: {datetime.datetime.now()}\n")
+        f.write(f"Mode: {args.mode}\n")
+        f.write(f"Original Input: {input_path}\n")
+        f.write(f"Tracked File: {file_to_track}\n")
+        f.write(f"Build Script: {args.build}\n")
+        f.write(f"Build Args: {args.args}\n")
+        f.write(f"Compiler Type: {args.compiler}\n")
+        f.write(f"Output Assembly: {args.output}\n")
+
+    # Setup signal handler for clean exits
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    # Set file paths
+    tracked_file_base = os.path.basename(file_to_track)
+    original_file = os.path.join(session_dir, f"original_{tracked_file_base}")
+
+    if args.mode == "source":
+        original_asm = os.path.join(session_dir, "assembly", "original.s")
+        modified_asm = os.path.join(session_dir, "assembly", "modified.s")
+    else:  # binary mode
+        original_asm = os.path.join(session_dir, "assembly", "original.s")
+        modified_asm = os.path.join(session_dir, "assembly", "modified.s")
+
+    # Create a backup of the original file
+    if os.path.isfile(file_to_track):
+        shutil.copy2(file_to_track, original_file)
+        log_verbose(f"Created backup of original file at {original_file}", args.verbose)
+    else:
+        print(f"\033[0;31mError: Tracked file {file_to_track} does not exist\033[0m")
+        return 1
+
+    # Generate assembly for the original file
+    print("\033[0;32mGenerating assembly for original file...\033[0m")
+    if args.mode == "source":
+        if args.build:
+            # When using build script, compile directly from the original input
+            success = compile_to_asm(
+                original_file, original_asm,
+                build_script=args.build,
+                build_args=args.args,
+                input_path=input_path,
+                output_asm=args.output,
+                is_directory=is_directory,
+                compiler_type=args.compiler,
+                verbose=args.verbose
+            )
+        else:
+            # When not using build script, compile from our backup
+            success = compile_to_asm(
+                original_file, original_asm,
+                compiler_type=args.compiler,
+                verbose=args.verbose
+            )
+
+        if not success:
+            return 1
+    else:  # binary mode
+        # In binary mode, save a copy of the binary
+        binary_count = 1
+        binary_copy = os.path.join(session_dir, "binaries", f"binary_{binary_count}")
+        shutil.copy2(input_path, binary_copy)
+        success = disassemble_to_asm(
+            binary_copy, original_asm,
+            disasm_args=args.args,
+            verbose=args.verbose
+        )
+        if not success:
+            return 1
+        log_verbose(f"Saved binary copy to {binary_copy}", args.verbose)
+
+    # Print session information
+    print("\033[0;36m=======================================\033[0m")
+    print(f"\033[0;36m   Assembly Diff Session #{next_session}: {session_name}\033[0m")
+    print("\033[0;36m=======================================\033[0m")
+    print(f"\033[0;33mSession directory: {session_dir}\033[0m")
+    print(f"\033[0;33mMode: {args.mode}\033[0m")
+    print(f"\033[0;33mTracking: {file_to_track}\033[0m")
+    print(f"\033[0;33mOriginal assembly: {original_asm}\033[0m")
+    print("\033[0;36m=======================================\033[0m")
+
+    print("")
+    print("\033[0;32mInteractive assembly diff mode\033[0m")
+    print("\033[0;33m----------------------------------------\033[0m")
+    print(f"Make changes to {file_to_track} in your editor.")
+    print("Press Enter to compile/disassemble and view diff against original.")
+    print("Press Ctrl+C to exit.")
+    print("\033[0;33m----------------------------------------\033[0m")
+
+    # Main loop
+    binary_count = 1
+    diff_count = 0
+
+    while True:
+        input("Press Enter to compare (Ctrl+C to exit)... ")
+
+        if args.mode == "source":
+            print("\033[0;32mCompiling modified file...\033[0m")
+            if args.build:
+                # When using build script, compile from the original input path
+                success = compile_to_asm(
+                    file_to_track, modified_asm,
+                    build_script=args.build,
+                    build_args=args.args,
+                    input_path=input_path,
+                    output_asm=args.output,
+                    is_directory=is_directory,
+                    compiler_type=args.compiler,
+                    verbose=args.verbose
+                )
+            else:
+                # When not using build script, compile directly from the tracked file
+                success = compile_to_asm(
+                    file_to_track, modified_asm,
+                    compiler_type=args.compiler,
+                    verbose=args.verbose
+                )
+
+            if not success:
+                continue
+        else:  # binary mode
+            print("\033[0;32mDisassembling modified binary...\033[0m")
+            binary_count += 1
+            binary_copy = os.path.join(session_dir, "binaries", f"binary_{binary_count}")
+            shutil.copy2(input_path, binary_copy)
+            success = disassemble_to_asm(
+                binary_copy, modified_asm,
+                disasm_args=args.args,
+                verbose=args.verbose
+            )
+            if not success:
+                continue
+
+            log_verbose(f"Saved binary copy to {binary_copy}", args.verbose)
+
+        print("\033[0;32mComparing assembly files...\033[0m")
+        print("Press 'q' to exit the diff viewer")
+
+        # Use diff with color and pipe to less with raw control characters
+        try:
+            diff_proc = subprocess.Popen(
+                ["diff", "--color=always", "-U9999999999999999999", original_asm, modified_asm],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+
+            less_proc = subprocess.Popen(
+                ["less", "-R"],
+                stdin=diff_proc.stdout
+            )
+
+            less_proc.wait()
+        except Exception as e:
+            print(f"\033[0;31mError running diff: {e}\033[0m")
+            continue
+
+        print("\033[0;32mDiff complete.\033[0m")
+
+        # Save a copy of the diff with color information
+        diff_files = glob.glob(os.path.join(session_dir, "assembly", "diff_*.diff"))
+        diff_count = len(diff_files) + 1
+        diff_file = os.path.join(session_dir, "assembly", f"diff_{diff_count}.diff")
+        colored_diff = os.path.join(session_dir, "assembly", f"diff_{diff_count}.colored.diff")
+
+        # Save colored diff
+        try:
+            subprocess.run(
+                ["diff", "--color=always", "-u", original_asm, modified_asm],
+                stdout=open(colored_diff, 'w')
+            )
+
+            # Also save plain diff
+            subprocess.run(
+                ["diff", "-u", original_asm, modified_asm],
+                stdout=open(diff_file, 'w')
+            )
+        except Exception as e:
+            print(f"\033[0;31mError saving diff: {e}\033[0m")
+            continue
+
+        print("\033[0;32mDiff saved to:\033[0m")
+        print("Make more changes or press Ctrl+C to exit.")
+
+
+if __name__ == "__main__":
+    sys.exit(main())
