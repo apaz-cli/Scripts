@@ -26,25 +26,13 @@ BASE_TMP_DIR = os.environ.get("ASMDIFF_TMP_DIR", "/tmp/asmdiff")
 DEFAULT_COMPILER_FLAGS = ["-S", "-O3", "-march=skylake", "-mavx512f"]
 DEFAULT_LINKER_FLAGS = ["-lm", "-lpthread"]
 
-# Default compiler commands
-DEFAULT_CLANG_C_CMD = ["clang"] + DEFAULT_COMPILER_FLAGS
-DEFAULT_CLANG_CPP_CMD = ["clang++"] + DEFAULT_COMPILER_FLAGS
-DEFAULT_GCC_C_CMD = ["gcc"] + DEFAULT_COMPILER_FLAGS
-DEFAULT_GCC_CPP_CMD = ["g++"] + DEFAULT_COMPILER_FLAGS
-
 # Add additional flags from environment if specified
 if "ASMDIFF_CFLAGS" in os.environ:
     additional_flags = os.environ.get("ASMDIFF_CFLAGS", "").split()
-    DEFAULT_CLANG_C_CMD.extend(additional_flags)
-    DEFAULT_CLANG_CPP_CMD.extend(additional_flags)
-    DEFAULT_GCC_C_CMD.extend(additional_flags)
-    DEFAULT_GCC_CPP_CMD.extend(additional_flags)
+    DEFAULT_COMPILER_FLAGS.extend(additional_flags)
 
 # Add linker flags
-DEFAULT_CLANG_C_CMD.extend(DEFAULT_LINKER_FLAGS)
-DEFAULT_CLANG_CPP_CMD.extend(DEFAULT_LINKER_FLAGS)
-DEFAULT_GCC_C_CMD.extend(DEFAULT_LINKER_FLAGS)
-DEFAULT_GCC_CPP_CMD.extend(DEFAULT_LINKER_FLAGS)
+DEFAULT_COMPILER_FLAGS.extend(DEFAULT_LINKER_FLAGS)
 
 DEFAULT_DISASM_CMD = os.environ.get("ASMDIFF_DISASM_CMD", "objdump -d -S").split()
 
@@ -58,17 +46,23 @@ def log_verbose(message: str, verbose: bool = False) -> None:
 def detect_compiler(file_path: str, compiler_type: str = "clang") -> list[str]:
     """Detect the appropriate compiler command based on file extension."""
     file_ext = os.path.splitext(file_path)[1].lower()
-
+    
+    # Start with a copy of the default flags
+    cmd = DEFAULT_COMPILER_FLAGS.copy()
+    
+    # Prepend the appropriate compiler based on file extension and compiler type
     if file_ext in (".cpp", ".cc", ".cxx", ".c++"):
         if compiler_type == "clang":
-            return DEFAULT_CLANG_CPP_CMD.copy()
+            cmd.insert(0, "clang++")
         else:
-            return DEFAULT_GCC_CPP_CMD.copy()
+            cmd.insert(0, "g++")
     else:
         if compiler_type == "clang":
-            return DEFAULT_CLANG_C_CMD.copy()
+            cmd.insert(0, "clang")
         else:
-            return DEFAULT_GCC_C_CMD.copy()
+            cmd.insert(0, "gcc")
+            
+    return cmd
 
 
 def compile_to_asm(source_path: str, output_path: str, build_script: str = None, 
