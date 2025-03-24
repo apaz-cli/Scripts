@@ -21,14 +21,21 @@ from typing import List, Optional, Union, Any, Dict, Tuple
 
 # Default settings - can be overridden by environment variables
 BASE_TMP_DIR = os.environ.get("ASMDIFF_TMP_DIR", "/tmp/asmdiff")
-DEFAULT_CLANG_C_CMD = os.environ.get("ASMDIFF_CLANG_C_FLAGS", "-S -O3 -march=skylake -mavx512f").split()
-DEFAULT_CLANG_C_CMD.insert(0, os.environ.get("ASMDIFF_CLANG_C", "clang"))
-DEFAULT_CLANG_CPP_CMD = os.environ.get("ASMDIFF_CLANG_CPP_FLAGS", "-S -O3 -march=skylake -mavx512f").split()
-DEFAULT_CLANG_CPP_CMD.insert(0, os.environ.get("ASMDIFF_CLANG_CPP", "clang++"))
-DEFAULT_GCC_C_CMD = os.environ.get("ASMDIFF_GCC_C_FLAGS", "-S -O3 -march=skylake -mavx512f").split()
-DEFAULT_GCC_C_CMD.insert(0, os.environ.get("ASMDIFF_GCC_C", "gcc"))
-DEFAULT_GCC_CPP_CMD = os.environ.get("ASMDIFF_GCC_CPP_FLAGS", "-S -O3 -march=skylake -mavx512f").split()
-DEFAULT_GCC_CPP_CMD.insert(0, os.environ.get("ASMDIFF_GCC_CPP", "g++"))
+
+# Default compiler commands
+DEFAULT_CLANG_C_CMD = ["clang", "-S", "-O3", "-march=skylake", "-mavx512f"]
+DEFAULT_CLANG_CPP_CMD = ["clang++", "-S", "-O3", "-march=skylake", "-mavx512f"]
+DEFAULT_GCC_C_CMD = ["gcc", "-S", "-O3", "-march=skylake", "-mavx512f"]
+DEFAULT_GCC_CPP_CMD = ["g++", "-S", "-O3", "-march=skylake", "-mavx512f"]
+
+# Add additional flags from environment if specified
+if "ASMDIFF_CFLAGS" in os.environ:
+    additional_flags = os.environ.get("ASMDIFF_CFLAGS", "").split()
+    DEFAULT_CLANG_C_CMD.extend(additional_flags)
+    DEFAULT_CLANG_CPP_CMD.extend(additional_flags)
+    DEFAULT_GCC_C_CMD.extend(additional_flags)
+    DEFAULT_GCC_CPP_CMD.extend(additional_flags)
+
 DEFAULT_DISASM_CMD = os.environ.get("ASMDIFF_DISASM_CMD", "objdump -d -S").split()
 
 
@@ -210,14 +217,7 @@ Environment Variables:
   ASMDIFF_VERBOSE         Set to any value to enable verbose output
   ASMDIFF_COMPILER        Compiler to use: 'clang' or 'gcc'
   ASMDIFF_OUTPUT          Output assembly file path
-  ASMDIFF_CLANG_C         Path to clang C compiler
-  ASMDIFF_CLANG_CPP       Path to clang C++ compiler
-  ASMDIFF_GCC_C           Path to gcc C compiler
-  ASMDIFF_GCC_CPP         Path to g++ C++ compiler
-  ASMDIFF_CLANG_C_FLAGS   Flags for clang C compiler
-  ASMDIFF_CLANG_CPP_FLAGS Flags for clang C++ compiler
-  ASMDIFF_GCC_C_FLAGS     Flags for gcc C compiler
-  ASMDIFF_GCC_CPP_FLAGS   Flags for g++ C++ compiler
+  ASMDIFF_CFLAGS          Additional compiler flags for all compilers
   ASMDIFF_DISASM_CMD      Disassembly command and flags
 """
     )
