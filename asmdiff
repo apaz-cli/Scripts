@@ -164,18 +164,39 @@ def signal_handler(sig, frame):
 
 def main():
     """Main entry point for the script."""
-    parser = argparse.ArgumentParser(description="Interactive Assembly Diff Tool")
-    parser.add_argument("input_path", help="Input file or directory")
+    parser = argparse.ArgumentParser(
+        description="Interactive Assembly Diff Tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Compare assembly for a C/C++ file using default compiler (clang)
+  asmdiff myfile.cpp
+
+  # Compare assembly for a C/C++ file using gcc
+  asmdiff myfile.c -c gcc
+
+  # Use a custom build script
+  asmdiff project_dir/ -b ./build.sh -f src/main.cpp
+
+  # Disassemble and compare a binary
+  asmdiff mybinary -m binary
+
+  # Use verbose mode with custom session name
+  asmdiff myfile.cpp -v -s optimization_test
+"""
+    )
+    parser.add_argument("input_path", help="Input file or directory to analyze")
     parser.add_argument("-m", "--mode", choices=["source", "binary"], default="source",
-                        help="Set mode: 'source' (default) or 'binary'")
+                        help="Set mode: 'source' (compile code) or 'binary' (disassemble)")
     parser.add_argument("-b", "--build", help="Use custom build script instead of default compiler")
-    parser.add_argument("-a", "--args", help="Pass arguments to build script")
+    parser.add_argument("-a", "--args", help="Pass arguments to build script or disassembler")
     parser.add_argument("-s", "--session", help="Set custom session name (default: auto-generated)")
-    parser.add_argument("-f", "--file", help="Specify path to track when using build script")
+    parser.add_argument("-f", "--file", 
+                        help="Specify path to track when using build script with a directory")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
     parser.add_argument("-c", "--compiler", choices=["clang", "gcc"], default="clang",
                         help="Compiler to use (default: clang)")
-    parser.add_argument("-o", "--output", help="Specify output assembly file path")
+    parser.add_argument("-o", "--output", help="Specify output assembly file path from build script")
 
     args = parser.parse_args()
 
