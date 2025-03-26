@@ -24,7 +24,7 @@ BASE_TMP_DIR = os.environ.get("ASMDIFF_TMP_DIR", "/tmp/asmdiff")
 
 # Default compiler flags (shared across all compilers)
 DEFAULT_COMPILER_FLAGS = ["-S", "-O3", "-march=skylake", "-mavx512f"]
-DEFAULT_LINKER_FLAGS = ["-lm", "-lpthread"]
+DEFAULT_LINKER_FLAGS = ["-lm", "-lpthread", "-Wno-unused-command-line-argument"]
 
 # Add additional flags from environment if specified
 if "ASMDIFF_CFLAGS" in os.environ:
@@ -46,10 +46,10 @@ def log_verbose(message: str, verbose: bool = False) -> None:
 def detect_compiler(file_path: str, compiler_type: str = "clang") -> list[str]:
     """Detect the appropriate compiler command based on file extension."""
     file_ext = os.path.splitext(file_path)[1].lower()
-    
+
     # Start with a copy of the default flags
     cmd = DEFAULT_COMPILER_FLAGS.copy()
-    
+
     # Prepend the appropriate compiler based on file extension and compiler type
     if file_ext in (".cpp", ".cc", ".cxx", ".c++"):
         if compiler_type == "clang":
@@ -61,7 +61,7 @@ def detect_compiler(file_path: str, compiler_type: str = "clang") -> list[str]:
             cmd.insert(0, "clang")
         else:
             cmd.insert(0, "gcc")
-            
+
     return cmd
 
 
@@ -112,7 +112,7 @@ def compile_to_asm(source_path: str, output_path: str, build_script: str = None,
             # Execute in the workspace directory
             cwd = os.getcwd()
             os.chdir(work_dir)
-            
+
             # Set environment variables for the build script
             env = os.environ.copy()
             env["ASMDIFF_INPUT_FILE"] = os.path.abspath(source_path)
@@ -120,7 +120,7 @@ def compile_to_asm(source_path: str, output_path: str, build_script: str = None,
             env["ASMDIFF_WORKSPACE"] = os.path.abspath(work_dir)
             if output_asm:
                 env["ASMDIFF_ASM_OUTPUT"] = os.path.abspath(output_asm_path)
-            
+
             subprocess.run(cmd, check=True, env=env)
             os.chdir(cwd)
         except subprocess.CalledProcessError as e:
@@ -222,34 +222,34 @@ Environment Variables:
   ASMDIFF_COMPILER        Compiler to use: 'clang' or 'gcc'
   ASMDIFF_OUTPUT          Output assembly file path
   ASMDIFF_CFLAGS          Additional compiler flags for all compilers
-  
+
 Default compiler flags: -S -O3 -march=skylake -mavx512f -lm -lpthread
   ASMDIFF_DISASM_CMD      Disassembly command and flags
 """
     )
     parser.add_argument("input_path", help="Input file or directory to analyze")
-    parser.add_argument("-m", "--mode", choices=["source", "binary"], 
+    parser.add_argument("-m", "--mode", choices=["source", "binary"],
                         default=os.environ.get("ASMDIFF_MODE", "source"),
                         help="Set mode: 'source' (compile code) or 'binary' (disassemble)")
-    parser.add_argument("-b", "--build", 
+    parser.add_argument("-b", "--build",
                         default=os.environ.get("ASMDIFF_BUILD_SCRIPT"),
                         help="Use custom build script instead of default compiler")
-    parser.add_argument("-a", "--args", 
+    parser.add_argument("-a", "--args",
                         default=os.environ.get("ASMDIFF_BUILD_ARGS"),
                         help="Pass arguments to build script or disassembler")
-    parser.add_argument("-s", "--session", 
+    parser.add_argument("-s", "--session",
                         default=os.environ.get("ASMDIFF_SESSION"),
                         help="Set custom session name (default: auto-generated)")
-    parser.add_argument("-f", "--file", 
+    parser.add_argument("-f", "--file",
                         default=os.environ.get("ASMDIFF_TRACK_FILE"),
                         help="Specify path to track when using build script with a directory")
-    parser.add_argument("-v", "--verbose", action="store_true", 
+    parser.add_argument("-v", "--verbose", action="store_true",
                         default=bool(os.environ.get("ASMDIFF_VERBOSE")),
                         help="Enable verbose output")
-    parser.add_argument("-c", "--compiler", choices=["clang", "gcc"], 
+    parser.add_argument("-c", "--compiler", choices=["clang", "gcc"],
                         default=os.environ.get("ASMDIFF_COMPILER", "clang"),
                         help="Compiler to use (default: clang)")
-    parser.add_argument("-o", "--output", 
+    parser.add_argument("-o", "--output",
                         default=os.environ.get("ASMDIFF_OUTPUT"),
                         help="Specify output assembly file path from build script")
 
@@ -320,7 +320,7 @@ Default compiler flags: -S -O3 -march=skylake -mavx512f -lm -lpthread
         f.write(f"Build Args: {args.args}\n")
         f.write(f"Compiler Type: {args.compiler}\n")
         f.write(f"Output Assembly: {args.output}\n")
-        
+
         # Record environment variables used
         f.write("\nEnvironment Variables:\n")
         for key, value in os.environ.items():
@@ -454,12 +454,11 @@ Default compiler flags: -S -O3 -march=skylake -mavx512f -lm -lpthread
             log_verbose(f"Saved binary copy to {binary_copy}", args.verbose)
 
         print("\033[0;32mComparing assembly files...\033[0m")
-        print("Press 'q' to exit the diff viewer")
 
         # Use diff with color and pipe to less with raw control characters
         try:
             diff_proc = subprocess.Popen(
-                ["diff", "--color=always", "-U9999999999999999999", original_asm, modified_asm],
+                ["diff", "--color=always", "-U20", original_asm, modified_asm],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
@@ -482,14 +481,12 @@ Default compiler flags: -S -O3 -march=skylake -mavx512f -lm -lpthread
         diff_file = os.path.join(session_dir, "assembly", f"diff_{diff_count}.diff")
         colored_diff = os.path.join(session_dir, "assembly", f"diff_{diff_count}.colored.diff")
 
-        # Save colored diff
+        # Save colored and plain diffs
         try:
             subprocess.run(
                 ["diff", "--color=always", "-u", original_asm, modified_asm],
                 stdout=open(colored_diff, 'w')
             )
-
-            # Also save plain diff
             subprocess.run(
                 ["diff", "-u", original_asm, modified_asm],
                 stdout=open(diff_file, 'w')
@@ -498,7 +495,7 @@ Default compiler flags: -S -O3 -march=skylake -mavx512f -lm -lpthread
             print(f"\033[0;31mError saving diff: {e}\033[0m")
             continue
 
-        print("\033[0;32mDiff saved to:\033[0m")
+        print(f"\033[0;32mDiff saved to: {diff_file}\033[0m")
         print("Make more changes or press Ctrl+C to exit.")
 
 
