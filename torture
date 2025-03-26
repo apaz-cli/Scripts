@@ -103,45 +103,90 @@ __global__ void gpu_torture_kernel(float **data_blocks, size_t n_blocks,
 }
 #endif
 
+typedef struct {
+  int device_id;
+} GPUThreadArg;
+
+// Function to check if a GPU has enough memory
+bool has_enough_memory(int device, size_t min_memory_gb) {
+#ifdef __CUDACC__
+  cudaDeviceProp prop;
+  cudaError_t err = cudaGetDeviceProperties(&prop, device);
+  if (err != cudaSuccess) {
+    fprintf(stderr, "CUDA error getting device properties: %s\n",
+            cudaGetErrorString(err));
+    return false;
+  }
+  
+  size_t total_memory_bytes = prop.totalGlobalMem;
+  double total_memory_gb = (double)total_memory_bytes / ONE_GB;
+  
+  return total_memory_gb >= min_memory_gb;
+#else
+  return false;
+#endif
+}
+
 void *launch_gpu_torture(void *arg) {
-  (void)arg;
+  GPUThreadArg *thread_arg = (GPUThreadArg *)arg;
+  int device_id = thread_arg->device_id;
 
 #ifdef __CUDACC__
+  // Set the device for this thread
+  cudaError_t err = cudaSetDevice(device_id);
+  if (err != cudaSuccess) {
+    fprintf(stderr, "CUDA error setting device %d: %s\n", 
+            device_id, cudaGetErrorString(err));
+    return NULL;
+  }
+
+  // Get device properties
+  cudaDeviceProp prop;
+  err = cudaGetDeviceProperties(&prop, device_id);
+  if (err != cudaSuccess) {
+    fprintf(stderr, "CUDA error getting device properties: %s\n",
+            cudaGetErrorString(err));
+    return NULL;
+  }
+  
+  printf("Running torture on GPU %d: %s (%.2f GB memory)\n", 
+         device_id, prop.name, (double)prop.totalGlobalMem / ONE_GB);
+
   // Allocate almost all available GPU memory
   size_t total_allocated = 0;
   size_t n_blocks = 0;
   float *gpu_memory_blocks[MAX_BLOCK_ALLOCS];
   while (n_blocks < MAX_BLOCK_ALLOCS) {
     float *d_data;
-    cudaError_t err = cudaMalloc(&d_data, HALF_GB);
+    err = cudaMalloc(&d_data, HALF_GB);
     if (err != cudaSuccess) {
       if (err == cudaErrorMemoryAllocation) {
         cudaGetLastError(); // Clear the error
         break;
       }
-      fprintf(stderr, "CUDA error allocating memory: %s\n",
-              cudaGetErrorString(err));
-      exit(1);
+      fprintf(stderr, "CUDA error allocating memory on device %d: %s\n",
+              device_id, cudaGetErrorString(err));
+      return NULL;
     }
 
     gpu_memory_blocks[n_blocks++] = d_data;
     total_allocated += HALF_GB;
   }
 
-  printf("GPU memory allocated: %.2f GB\n", (float)total_allocated / ONE_GB);
+  printf("GPU %d memory allocated: %.2f GB\n", device_id, (float)total_allocated / ONE_GB);
 
   // Allocate and copy device pointers to GPU
   size_t block_size = HALF_GB / sizeof(float);
   size_t total_elements = n_blocks * block_size;
   float **d_data_blocks;
   if (cudaMalloc(&d_data_blocks, n_blocks * sizeof(float *)) != cudaSuccess) {
-    fprintf(stderr, "Failed to allocate device memory for data blocks\n");
-    exit(1);
+    fprintf(stderr, "Failed to allocate device memory for data blocks on GPU %d\n", device_id);
+    return NULL;
   }
   if (cudaMemcpy(d_data_blocks, gpu_memory_blocks, n_blocks * sizeof(float *),
                  cudaMemcpyHostToDevice) != cudaSuccess) {
-    fprintf(stderr, "Failed to copy data blocks to device\n");
-    exit(1);
+    fprintf(stderr, "Failed to copy data blocks to device %d\n", device_id);
+    return NULL;
   }
 
   // Launch the kernel in an infinite loop.
@@ -152,20 +197,20 @@ void *launch_gpu_torture(void *arg) {
     gpu_torture_kernel<<<grid, block>>>(d_data_blocks, n_blocks, block_size);
 
     // Check for errors
-    cudaError_t err = cudaGetLastError();
+    err = cudaGetLastError();
     if (err != cudaSuccess) {
-      fprintf(stderr, "CUDA error launching kernel: %s\n",
-              cudaGetErrorString(err));
-      exit(1);
+      fprintf(stderr, "CUDA error launching kernel on device %d: %s\n",
+              device_id, cudaGetErrorString(err));
+      return NULL;
     }
 
     // Wait for the kernel to complete
     err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
-      fprintf(stderr, "CUDA error synchronizing devices: %s\n",
-              cudaGetErrorString(err));
+      fprintf(stderr, "CUDA error synchronizing device %d: %s\n",
+              device_id, cudaGetErrorString(err));
     } else {
-      puts("GPU torture kernel finished");
+      printf("GPU %d torture kernel finished\n", device_id);
     }
   }
 #else
@@ -309,7 +354,10 @@ int main(int argc, char **argv) {
     mem_bytes = ONE_GB;
   }
 
-  pthread_t gpu_thread;
+  pthread_t gpu_threads[16]; // Support up to 16 GPUs
+  GPUThreadArg gpu_thread_args[16];
+  int gpu_thread_count = 0;
+  
   if (run_gpu) {
     // Initialize CUDA
     int deviceCount;
@@ -323,17 +371,35 @@ int main(int argc, char **argv) {
       fprintf(stderr, "No CUDA devices found\n");
       return 1;
     }
-    err = cudaSetDevice(0);
-    if (err != cudaSuccess) {
-      fprintf(stderr, "CUDA error setting device: %s\n",
-              cudaGetErrorString(err));
-      return 1;
+    
+    // Check each GPU and create threads for those with enough memory
+    for (int i = 0; i < deviceCount; i++) {
+      if (has_enough_memory(i, 5.0)) { // Require at least 5GB of memory
+        gpu_thread_args[gpu_thread_count].device_id = i;
+        
+        if (pthread_create(&gpu_threads[gpu_thread_count], NULL, 
+                          launch_gpu_torture, &gpu_thread_args[gpu_thread_count]) != 0) {
+          fprintf(stderr, "Failed to create GPU torture thread for device %d\n", i);
+          return 1;
+        }
+        gpu_thread_count++;
+      } else {
+        // Get device properties to show name in the skip message
+        cudaDeviceProp prop;
+        if (cudaGetDeviceProperties(&prop, i) == cudaSuccess) {
+          double memory_gb = (double)prop.totalGlobalMem / ONE_GB;
+          printf("Skipping GPU %d: %s (%.2f GB memory) - less than 5GB required\n", 
+                 i, prop.name, memory_gb);
+        } else {
+          printf("Skipping GPU %d: insufficient memory (less than 5GB)\n", i);
+        }
+      }
     }
-
-    // Create GPU torture thread
-    if (pthread_create(&gpu_thread, NULL, launch_gpu_torture, NULL) != 0) {
-      fprintf(stderr, "Failed to create GPU torture thread\n");
-      return 1;
+    
+    if (gpu_thread_count == 0) {
+      fprintf(stderr, "No GPUs with at least 5GB of memory found\n");
+    } else {
+      printf("Running torture test on %d GPU(s)\n", gpu_thread_count);
     }
   }
 
