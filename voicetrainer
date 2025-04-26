@@ -1,10 +1,13 @@
 #!/bin/sh
 
+WD="$(pwd)"
 INSTALL_DIR="/tmp/VoiceTrainer"
 if [ ! -d "$INSTALL_DIR" ]; then
     git clone --depth=1 https://github.com/apaz-cli/VoiceTrainer "$INSTALL_DIR" >/dev/null
 fi
 
 cd "$INSTALL_DIR"
+./build.sh
 
-./build.sh run "$@"
+cd "$WD"
+"$INSTALL_DIR/voice" "$@"
