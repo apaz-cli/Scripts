@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# Set brightness based on argument or default to full
+case "${1:-full}" in
+    full)  brightness=1.0 ;;
+    half)  brightness=0.5 ;;
+    low)   brightness=0.2 ;;
+    *)     brightness=${1}
+           if ! [[ "$brightness" =~ ^[0-9]*(\.[0-9]+)?$ ]] || (( $(echo "$brightness < 0 || $brightness > 1" | bc -l) )); then
+               echo "Error: Please use a number between 0-1 or 'full', 'half', or 'low'"
+               exit 1
+           fi ;;
+esac
+
+# Set brightness for all connected outputs
+xrandr -q | grep ' connected' | cut -d ' ' -f1 | while read output; do
+    xrandr --output "$output" --brightness $brightness
+    echo "Set $output to brightness $brightness"
+done
