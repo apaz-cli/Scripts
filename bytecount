@@ -1,0 +1,149 @@
+#if 0
+TMP="$(mktemp -d)"; cc -o "$TMP/a.out" -x c "$0" && "$TMP/a.out" "$@"; RVAL=$?; rm -rf "$TMP"; exit $RVAL
+#endif
+
+#define _POSIX_C_SOURCE 200809L
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <limits.h>
+#include <errno.h>
+
+/* Global flag for following symlinks */
+int follow_symlinks = 0;
+
+/* Function to print usage information */
+void print_usage(const char *prog_name) {
+    printf("Usage: %s [OPTIONS] [DIRECTORY]\n", prog_name);
+    printf("Recursively count total bytes in files and directories.\n\n");
+    printf("Options:\n");
+    printf("  -L, --follow    Follow symbolic links\n");
+    printf("  -h, --help      Display this help message\n\n");
+    printf("Arguments:\n");
+    printf("  DIRECTORY       Directory to analyze (default: current directory)\n\n");
+    printf("Examples:\n");
+    printf("  %s              Count bytes in current directory\n", prog_name);
+    printf("  %s /home/user   Count bytes in /home/user\n", prog_name);
+    printf("  %s -L /tmp      Count bytes in /tmp, following symlinks\n", prog_name);
+}
+
+/* Recursive function to count bytes */
+long long count_bytes(const char *path) {
+    struct stat st;
+    struct dirent *entry;
+    DIR *dir;
+    char full_path[PATH_MAX];
+    long long total_bytes = 0;
+    int stat_result;
+    
+    /* Use lstat or stat based on symlink flag */
+    if (follow_symlinks) {
+        stat_result = stat(path, &st);
+    } else {
+        stat_result = lstat(path, &st);
+    }
+    
+    if (stat_result == -1) {
+        fprintf(stderr, "Error accessing '%s': %s\n", path, strerror(errno));
+        return 0;
+    }
+    
+    /* If it's a regular file, return its size */
+    if (S_ISREG(st.st_mode)) {
+        return st.st_size;
+    }
+    
+    /* If it's a directory, recurse into it */
+    if (S_ISDIR(st.st_mode)) {
+        dir = opendir(path);
+        if (dir == NULL) {
+            fprintf(stderr, "Error opening directory '%s': %s\n", path, strerror(errno));
+            return 0;
+        }
+        
+        /* Read directory entries */
+        while ((entry = readdir(dir)) != NULL) {
+            /* Skip . and .. */
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+                continue;
+            }
+            
+            /* Build full path */
+            if (snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name) >= sizeof(full_path)) {
+                fprintf(stderr, "Path too long: %s/%s\n", path, entry->d_name);
+                continue;
+            }
+            
+            /* Recursively count bytes */
+            total_bytes += count_bytes(full_path);
+        }
+        
+        closedir(dir);
+    }
+    /* If it's a symlink and we're not following them, size is 0 */
+    /* (already handled by not following the link) */
+    
+    return total_bytes;
+}
+
+/* Function to format bytes in human-readable form */
+void format_bytes(long long bytes, char *buffer, size_t buffer_size) {
+    const char *units[] = {"B", "KB", "MB", "GB", "TB", "PB"};
+    int unit_index = 0;
+    double size = (double)bytes;
+    
+    while (size >= 1024.0 && unit_index < 5) {
+        size /= 1024.0;
+        unit_index++;
+    }
+    
+    if (unit_index == 0) {
+        snprintf(buffer, buffer_size, "%lld %s", bytes, units[0]);
+    } else {
+        snprintf(buffer, buffer_size, "%.2f %s", size, units[unit_index]);
+    }
+}
+
+int main(int argc, char *argv[]) {
+    int opt;
+    char *target_dir = ".";  /* Default to current directory */
+    long long total_bytes;
+    char formatted_size[32];
+    
+    /* Parse command line options */
+    while ((opt = getopt(argc, argv, "Lh")) != -1) {
+        switch (opt) {
+            case 'L':
+                follow_symlinks = 1;
+                break;
+            case 'h':
+                print_usage(argv[0]);
+                return 0;
+            default:
+                fprintf(stderr, "Invalid option. Use -h for help.\n");
+                return 1;
+        }
+    }
+    
+    /* Get target directory if specified */
+    if (optind < argc) {
+        target_dir = argv[optind];
+    }
+    
+    /* Check if target exists */
+    struct stat st;
+    if (stat(target_dir, &st) == -1) {
+        fprintf(stderr, "Error: Cannot access '%s': %s\n", target_dir, strerror(errno));
+        return 1;
+    }
+        
+    /* Format and display results */
+    total_bytes = count_bytes(target_dir);
+    format_bytes(total_bytes, formatted_size, sizeof(formatted_size));
+    printf("%lld bytes (%s)\n", total_bytes, formatted_size);
+    
+    return 0;
+}
