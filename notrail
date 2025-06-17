@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-
 """
 Remove trailing whitespace from text files.
 
 Usage:
     python strip_whitespace.py [path] [--dry]
-    
+
 Arguments:
     path        Directory or file path (default: current directory)
     --dry       Show diff without modifying files
@@ -28,6 +27,7 @@ class Colors:
     CYAN = '\033[96m'
     RESET = '\033[0m'
     BOLD = '\033[1m'
+    RED_BG = '\033[41m'  # Red background
 
 def is_text_file(filepath: Path) -> bool:
     """Check if file is likely a text file using mimetype."""
@@ -35,7 +35,7 @@ def is_text_file(filepath: Path) -> bool:
     mime_type, _ = mimetypes.guess_type(str(filepath))
     if mime_type and mime_type.startswith('text/'):
         return True
-    
+
     # Common text file extensions that might not be recognized
     text_extensions = {
         '.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml',
@@ -48,18 +48,18 @@ def is_text_file(filepath: Path) -> bool:
         '.toml', '.lock', '.gemspec', '.rakefile', '.makefile', '.cmake',
         '.gradle', '.sbt', '.cabal', '.nimble', '.cr', '.jl', '.v', '.zig'
     }
-    
+
     if filepath.suffix.lower() in text_extensions:
         return True
-    
+
     # Files without extension that are usually text
-    if filepath.name in {'Makefile', 'Dockerfile', 'Jenkinsfile', 'Rakefile', 
+    if filepath.name in {'Makefile', 'Dockerfile', 'Jenkinsfile', 'Rakefile',
                          'Gemfile', 'Guardfile', 'Capfile', 'Thorfile', 'Vagrantfile',
                          'Berksfile', 'Cheffile', 'Jugfile', 'Procfile', 'README',
                          'LICENSE', 'CHANGELOG', 'AUTHORS', 'CONTRIBUTORS', 'TODO',
                          'INSTALL', 'NEWS', 'HISTORY', 'NOTICE', 'MANIFEST'}:
         return True
-    
+
     # Try to read a small portion to check if it's text
     try:
         with open(filepath, 'rb') as f:
@@ -81,14 +81,14 @@ def is_text_file(filepath: Path) -> bool:
                         continue
     except Exception:
         return False
-    
+
     return False
 
 def strip_trailing_whitespace(content: str) -> str:
     """Remove trailing whitespace from each line."""
     lines = content.splitlines(keepends=True)
     stripped_lines = []
-    
+
     for line in lines:
         if line.endswith('\n'):
             stripped_lines.append(line.rstrip() + '\n')
@@ -97,33 +97,33 @@ def strip_trailing_whitespace(content: str) -> str:
         else:
             # Last line without newline
             stripped_lines.append(line.rstrip())
-    
+
     return ''.join(stripped_lines)
 
 def get_colored_diff(original: str, modified: str, filename: str) -> Optional[str]:
     """Generate colored diff between original and modified content."""
     if original == modified:
         return None
-    
+
     original_lines = original.splitlines(keepends=True)
     modified_lines = modified.splitlines(keepends=True)
-    
+
     diff_lines = []
     diff_lines.append(f"{Colors.BOLD}{Colors.CYAN}--- {filename}{Colors.RESET}")
     diff_lines.append(f"{Colors.BOLD}{Colors.CYAN}+++ {filename} (stripped){Colors.RESET}")
-    
+
     # Generate unified diff
     diff = difflib.unified_diff(
-        original_lines, 
-        modified_lines, 
+        original_lines,
+        modified_lines,
         n=3,
         lineterm=''
     )
-    
+
     # Skip the first two lines (file headers)
     for _ in range(2):
         next(diff, None)
-    
+
     for line in diff:
         if line.startswith('@@'):
             diff_lines.append(f"{Colors.BLUE}{line}{Colors.RESET}")
@@ -132,22 +132,38 @@ def get_colored_diff(original: str, modified: str, filename: str) -> Optional[st
             visible_part = line.rstrip()
             whitespace_part = line[len(visible_part):]
             if whitespace_part and whitespace_part != '\n':
-                # Make trailing whitespace visible with background
-                whitespace_visual = whitespace_part.replace(' ', '·').replace('\t', '→')
-                diff_lines.append(f"{Colors.RED}{visible_part}{Colors.YELLOW}{whitespace_visual}{Colors.RESET}")
+                # Show actual whitespace with red background, use escape sequences for non-printables
+                whitespace_visual = ''
+                for char in whitespace_part:
+                    if char == ' ':
+                        whitespace_visual += f"{Colors.RED_BG} {Colors.RESET}"
+                    elif char == '\t':
+                        whitespace_visual += f"{Colors.RED_BG}\\t{Colors.RESET}"
+                    elif char == '\r':
+                        whitespace_visual += f"{Colors.RED_BG}\\r{Colors.RESET}"
+                    elif char == '\n':
+                        continue  # Don't show newline
+                    elif char == '\v':
+                        whitespace_visual += f"{Colors.RED_BG}\\v{Colors.RESET}"
+                    elif char == '\f':
+                        whitespace_visual += f"{Colors.RED_BG}\\f{Colors.RESET}"
+                    else:
+                        # For any other non-printable character, show its repr
+                        whitespace_visual += f"{Colors.RED_BG}{repr(char)[1:-1]}{Colors.RESET}"
+                diff_lines.append(f"{Colors.RED}{visible_part}{Colors.RESET}{whitespace_visual}")
             else:
                 diff_lines.append(f"{Colors.RED}{line.rstrip()}{Colors.RESET}")
         elif line.startswith('+'):
             diff_lines.append(f"{Colors.GREEN}{line.rstrip()}{Colors.RESET}")
         else:
             diff_lines.append(line.rstrip())
-    
+
     return '\n'.join(diff_lines) if len(diff_lines) > 2 else None
 
 def process_file(filepath: Path, dry_run: bool = False) -> Tuple[bool, Optional[str]]:
     """
     Process a single file to remove trailing whitespace.
-    
+
     Returns:
         (modified, diff_output) - modified is True if file had trailing whitespace
     """
@@ -156,7 +172,7 @@ def process_file(filepath: Path, dry_run: bool = False) -> Tuple[bool, Optional[
         encodings = ['utf-8', 'latin-1', 'cp1252', 'ascii']
         content = None
         used_encoding = None
-        
+
         for encoding in encodings:
             try:
                 with open(filepath, 'r', encoding=encoding) as f:
@@ -165,16 +181,16 @@ def process_file(filepath: Path, dry_run: bool = False) -> Tuple[bool, Optional[
                     break
             except UnicodeDecodeError:
                 continue
-        
+
         if content is None:
             return False, f"Error: Could not decode {filepath}"
-        
+
         # Strip trailing whitespace
         stripped_content = strip_trailing_whitespace(content)
-        
+
         if content == stripped_content:
             return False, None
-        
+
         if dry_run:
             # Generate colored diff
             diff_output = get_colored_diff(content, stripped_content, str(filepath))
@@ -184,27 +200,27 @@ def process_file(filepath: Path, dry_run: bool = False) -> Tuple[bool, Optional[
             with open(filepath, 'w', encoding=used_encoding) as f:
                 f.write(stripped_content)
             return True, None
-            
+
     except Exception as e:
         return False, f"Error processing {filepath}: {str(e)}"
 
 def process_directory(path: Path, dry_run: bool = False) -> List[Tuple[Path, bool, Optional[str]]]:
     """Process all text files in a directory recursively."""
     results = []
-    
+
     for root, _, files in os.walk(path):
         for filename in files:
             filepath = Path(root) / filename
-            
+
             # Skip hidden files and directories
             if any(part.startswith('.') for part in filepath.parts):
                 continue
-            
+
             # Check if it's a text file
             if is_text_file(filepath):
                 modified, output = process_file(filepath, dry_run)
                 results.append((filepath, modified, output))
-    
+
     return results
 
 def main():
@@ -219,36 +235,36 @@ def main():
   %(prog)s myfile.txt --dry   # Dry run on single file
 """
     )
-    
+
     parser.add_argument(
         'path',
         nargs='?',
         default='.',
         help='File or directory path (default: current directory)'
     )
-    
+
     parser.add_argument(
         '--dry',
         action='store_true',
         help='Show diff without modifying files'
     )
-    
+
     args = parser.parse_args()
-    
+
     path = Path(args.path).resolve()
-    
+
     if not path.exists():
         print(f"Error: Path '{path}' does not exist", file=sys.stderr)
         sys.exit(1)
-    
+
     # Process single file or directory
     if path.is_file():
         if not is_text_file(path):
             print(f"Warning: {path} does not appear to be a text file", file=sys.stderr)
             sys.exit(1)
-        
+
         modified, output = process_file(path, args.dry)
-        
+
         if args.dry:
             if modified and output:
                 print(output)
@@ -260,17 +276,17 @@ def main():
                 print(f"{Colors.GREEN}✓ Stripped trailing whitespace from: {path}{Colors.RESET}")
             else:
                 print(f"No changes needed for: {path}")
-    
+
     else:  # Directory
         print(f"Processing directory: {path}")
         results = process_directory(path, args.dry)
-        
+
         if not results:
             print("No text files found.")
             sys.exit(0)
-        
+
         modified_files = [(f, o) for f, m, o in results if m]
-        
+
         if args.dry:
             if modified_files:
                 print(f"\n{Colors.BOLD}Files with trailing whitespace:{Colors.RESET}\n")
@@ -278,7 +294,7 @@ def main():
                     if output:
                         print(output)
                         print()
-                
+
                 print(f"{Colors.YELLOW}Would strip trailing whitespace from {len(modified_files)} file(s){Colors.RESET}")
             else:
                 print(f"{Colors.GREEN}No files with trailing whitespace found.{Colors.RESET}")
@@ -289,7 +305,7 @@ def main():
                 print(f"\n{Colors.BOLD}Modified {len(modified_files)} file(s){Colors.RESET}")
             else:
                 print("No files needed modification.")
-        
+
         # Summary
         total_files = len(results)
         print(f"\nProcessed {total_files} text file(s)")
