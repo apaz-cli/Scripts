@@ -237,10 +237,10 @@ def main():
     )
 
     parser.add_argument(
-        'path',
-        nargs='?',
-        default='.',
-        help='File or directory path (default: current directory)'
+        'paths',
+        nargs='*',
+        default=['.'],
+        help='File or directory paths (default: current directory)'
     )
 
     parser.add_argument(
@@ -251,64 +251,88 @@ def main():
 
     args = parser.parse_args()
 
-    path = Path(args.path).resolve()
+    all_results = []
+    all_modified_files = []
+    
+    for path_str in args.paths:
+        path = Path(path_str).resolve()
 
-    if not path.exists():
-        print(f"Error: Path '{path}' does not exist", file=sys.stderr)
-        sys.exit(1)
+        if not path.exists():
+            print(f"Error: Path '{path}' does not exist", file=sys.stderr)
+            continue
 
-    # Process single file or directory
-    if path.is_file():
-        if not is_text_file(path):
-            print(f"Warning: {path} does not appear to be a text file", file=sys.stderr)
-            sys.exit(1)
+        # Process single file or directory
+        if path.is_file():
+            if not is_text_file(path):
+                print(f"Warning: {path} does not appear to be a text file", file=sys.stderr)
+                continue
 
-        modified, output = process_file(path, args.dry)
+            modified, output = process_file(path, args.dry)
 
-        if args.dry:
-            if modified and output:
-                print(output)
-                print(f"\n{Colors.YELLOW}Would strip trailing whitespace from: {path}{Colors.RESET}")
+            if args.dry:
+                if modified and output:
+                    print(output)
+                    print(f"\n{Colors.YELLOW}Would strip trailing whitespace from: {path}{Colors.RESET}")
+                    all_modified_files.append((path, output))
+                else:
+                    print(f"{Colors.GREEN}No trailing whitespace in: {path}{Colors.RESET}")
             else:
-                print(f"{Colors.GREEN}No trailing whitespace in: {path}{Colors.RESET}")
-        else:
-            if modified:
-                print(f"{Colors.GREEN}✓ Stripped trailing whitespace from: {path}{Colors.RESET}")
+                if modified:
+                    print(f"{Colors.GREEN}✓ Stripped trailing whitespace from: {path}{Colors.RESET}")
+                    all_modified_files.append((path, None))
+                else:
+                    print(f"No changes needed for: {path}")
+            
+            all_results.append((path, modified, output))
+
+        else:  # Directory
+            print(f"Processing directory: {path}")
+            results = process_directory(path, args.dry)
+
+            if not results:
+                print("No text files found in directory.")
+                continue
+
+            modified_files = [(f, o) for f, m, o in results if m]
+            all_modified_files.extend(modified_files)
+            all_results.extend(results)
+
+            if args.dry:
+                if modified_files:
+                    print(f"\n{Colors.BOLD}Files with trailing whitespace in {path}:{Colors.RESET}\n")
+                    for filepath, output in modified_files:
+                        if output:
+                            print(output)
+                            print()
+                else:
+                    print(f"{Colors.GREEN}No files with trailing whitespace found in {path}.{Colors.RESET}")
             else:
-                print(f"No changes needed for: {path}")
+                if modified_files:
+                    for filepath, _ in modified_files:
+                        print(f"{Colors.GREEN}✓ Stripped: {filepath}{Colors.RESET}")
+                else:
+                    print(f"No files needed modification in {path}.")
 
-    else:  # Directory
-        print(f"Processing directory: {path}")
-        results = process_directory(path, args.dry)
+            # Summary for this directory
+            total_files = len(results)
+            print(f"Processed {total_files} text file(s) in {path}")
 
-        if not results:
-            print("No text files found.")
-            sys.exit(0)
-
-        modified_files = [(f, o) for f, m, o in results if m]
-
+    # Overall summary
+    if len(args.paths) > 1:
+        print(f"\n{Colors.BOLD}Overall Summary:{Colors.RESET}")
         if args.dry:
-            if modified_files:
-                print(f"\n{Colors.BOLD}Files with trailing whitespace:{Colors.RESET}\n")
-                for filepath, output in modified_files:
-                    if output:
-                        print(output)
-                        print()
-
-                print(f"{Colors.YELLOW}Would strip trailing whitespace from {len(modified_files)} file(s){Colors.RESET}")
+            if all_modified_files:
+                print(f"{Colors.YELLOW}Would strip trailing whitespace from {len(all_modified_files)} file(s) total{Colors.RESET}")
             else:
                 print(f"{Colors.GREEN}No files with trailing whitespace found.{Colors.RESET}")
         else:
-            if modified_files:
-                for filepath, _ in modified_files:
-                    print(f"{Colors.GREEN}✓ Stripped: {filepath}{Colors.RESET}")
-                print(f"\n{Colors.BOLD}Modified {len(modified_files)} file(s){Colors.RESET}")
+            if all_modified_files:
+                print(f"{Colors.BOLD}Modified {len(all_modified_files)} file(s) total{Colors.RESET}")
             else:
                 print("No files needed modification.")
-
-        # Summary
-        total_files = len(results)
-        print(f"\nProcessed {total_files} text file(s)")
+        
+        total_processed = len(all_results)
+        print(f"Processed {total_processed} text file(s) total")
 
 if __name__ == '__main__':
     main()
