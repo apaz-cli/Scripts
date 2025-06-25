@@ -228,11 +228,13 @@ def main():
         description='Remove trailing whitespace from text files.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
-  %(prog)s                    # Process current directory
-  %(prog)s myfile.txt         # Process single file
-  %(prog)s /path/to/dir       # Process directory
-  %(prog)s --dry              # Dry run on current directory
-  %(prog)s myfile.txt --dry   # Dry run on single file
+  %(prog)s                          # Process current directory
+  %(prog)s myfile.txt               # Process single file
+  %(prog)s /path/to/dir             # Process directory
+  %(prog)s file1.txt file2.py       # Process multiple files
+  %(prog)s dir1/ dir2/ file.txt     # Process multiple paths
+  %(prog)s --dry                    # Dry run on current directory
+  %(prog)s myfile.txt --dry         # Dry run on single file
 """
     )
 
