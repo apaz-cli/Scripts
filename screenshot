@@ -8,23 +8,23 @@ from pathlib import Path
 
 def take_screenshot():
     """Take a screenshot and open it in GIMP"""
-    
+
     # Ensure Screenshots directory exists
     screenshots_dir = Path.home() / "Screenshots"
     screenshots_dir.mkdir(exist_ok=True)
-    
+
     # Generate filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     screenshot_path = screenshots_dir / f"screenshot_{timestamp}.png"
-    
+
     print("Taking screenshot in 5 seconds...")
     time.sleep(5)
-    
+
     # Take screenshot using scrot
     try:
         subprocess.run(["scrot", str(screenshot_path)], check=True)
         print(f"Screenshot saved to: {screenshot_path}")
-        
+
         # Open in GIMP
         subprocess.run(["gimp", str(screenshot_path)], check=True)
     except subprocess.CalledProcessError as e:
@@ -33,7 +33,7 @@ def take_screenshot():
     except FileNotFoundError:
         print("Error: Required programs (scrot or gimp) not found")
         return False
-        
+
     return True
 
 if __name__ == "__main__":

@@ -78,7 +78,7 @@ int main(int argc, char *argv[]) {
     // Use provided program name
     temp_dir = (char*)malloc(strlen("/tmp/cshebang.") + strlen(argv[1]) + 1);
     sprintf(temp_dir, "/tmp/cshebang.%s", argv[1]);
-    
+
     c_file = (char*)malloc(strlen(temp_dir) + 1 + strlen(argv[1]) + 2 + 1);
     sprintf(c_file, "%s/%s.c", temp_dir, argv[1]);
   } else {
@@ -88,7 +88,7 @@ int main(int argc, char *argv[]) {
       fprintf(stderr, "Failed to create temporary directory\n");
       goto cleanup;
     }
-    
+
     size_t temp_dir_size = 0;
     ssize_t temp_dir_len = getline(&temp_dir, &temp_dir_size, temp);
     pclose(temp);
@@ -97,7 +97,7 @@ int main(int argc, char *argv[]) {
       fprintf(stderr, "Failed to read temporary directory name\n");
       goto cleanup;
     }
-    
+
     // Remove newline
     if (temp_dir[temp_dir_len - 1] == '\n') {
       temp_dir[temp_dir_len - 1] = '\0';

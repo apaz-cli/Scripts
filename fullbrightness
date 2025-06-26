@@ -1,5 +1,0 @@
-#!/bin/sh
-
-# Set the screen to full brightness.
-
-xrandr --output $(xrandr -q | grep ' connected' | head -n 1 | cut -d ' ' -f1) --brightness 1.0

@@ -1,8 +1,9 @@
 #if 0
-TMP="$(mktemp -d)"; cc -o "$TMP/a.out" -x c "$0" && "$TMP/a.out" "$@"; RVAL=$?; rm -rf "$TMP"; exit $RVAL
+TMP="$(mktemp -d)"; cc -o "$TMP/a.out" -x c "$0" -lpthread && "$TMP/a.out" "$@"; RVAL=$?; rm -rf "$TMP"; exit $RVAL
 #endif
 
 #define _POSIX_C_SOURCE 200809L
+#define _DEFAULT_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,81 +12,433 @@ TMP="$(mktemp -d)"; cc -o "$TMP/a.out" -x c "$0" && "$TMP/a.out" "$@"; RVAL=$?; 
 #include <unistd.h>
 #include <limits.h>
 #include <errno.h>
+#include <getopt.h>
+#include <fcntl.h>
+#include <pthread.h>
 
-/* Global flag for following symlinks */
+/* Global flags */
 int follow_symlinks = 0;
+int no_color = 0;
+int size_only = 0;
+int max_depth = -1;  /* -1 means unlimited */
+int num_threads = 4; /* Default number of worker threads */
+
+/* Sort order flags */
+#define SORT_NAME 1
+#define SORT_TYPE 2
+#define SORT_SIZE 4
+#define SORT_REVERSE 8
+
+/* Color codes */
+#define COLOR_RESET   "\033[0m"
+#define COLOR_BOLD    "\033[1m"
+#define COLOR_DIR     "\033[34m"    /* Blue */
+#define COLOR_FILE    "\033[37m"    /* White */
+#define COLOR_SIZE    "\033[33m"    /* Yellow */
+#define COLOR_TOTAL   "\033[32m"    /* Green */
+#define COLOR_ERROR   "\033[31m"    /* Red */
+
+/* Result entry for sorting */
+typedef struct {
+    char *path;
+    long long bytes;
+    int is_dir;
+} result_entry_t;
+
+/* Dynamic array for results */
+typedef struct {
+    result_entry_t *entries;
+    size_t count;
+    size_t capacity;
+} results_t;
+
+/* Sort order tracking */
+typedef struct {
+    int *order;
+    int count;
+    int capacity;
+} sort_order_t;
+
+static results_t results = {NULL, 0, 0};
+static sort_order_t sort_order = {NULL, 0, 0};
+
+/* Work queue for parallel processing */
+typedef struct work_item {
+    char *path;
+    int depth;
+    struct work_item *next;
+} work_item_t;
+
+typedef struct {
+    work_item_t *head;
+    work_item_t *tail;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    int shutdown;
+    int active_workers;
+    long long total_bytes;
+    pthread_mutex_t bytes_mutex;
+} work_queue_t;
+
+static work_queue_t work_queue = {
+    .head = NULL,
+    .tail = NULL,
+    .mutex = PTHREAD_MUTEX_INITIALIZER,
+    .cond = PTHREAD_COND_INITIALIZER,
+    .shutdown = 0,
+    .active_workers = 0,
+    .total_bytes = 0,
+    .bytes_mutex = PTHREAD_MUTEX_INITIALIZER
+};
 
 /* Function to print usage information */
 void print_usage(const char *prog_name) {
-    printf("Usage: %s [OPTIONS] [DIRECTORY]\n", prog_name);
-    printf("Recursively count total bytes in files and directories.\n\n");
+    printf("Usage: %s [OPTIONS] [PATH ...]\n", prog_name);
+    printf("Recursively count total bytes in files and directories.\n");
+    printf("\n");
     printf("Options:\n");
-    printf("  -L, --follow    Follow symbolic links\n");
-    printf("  -h, --help      Display this help message\n\n");
+    printf("  -f, --follow        Follow symbolic links\n");
+    printf("  -c, --no-color      Disable colored output\n");
+    printf("  -b, --bytes-only    Print only byte counts (no formatting or labels)\n");
+    printf("  -d, --max-depth=N   Maximum directory depth to traverse\n");
+    printf("  -j, --threads=N     Number of parallel threads (default: 4)\n");
+    printf("\n");
+    printf("Sorting:\n");
+    printf("  -n, --sort-name     Sort alphabetically by name\n");
+    printf("  -t, --sort-type     Sort by type (directories first)\n");
+    printf("  -s, --sort-size     Sort by size (largest first)\n");
+    printf("  -r, --reverse       Reverse the sort order\n");
+    printf("\n");
+    printf("  -h, --help          Display this help message\n");
+    printf("\n");
     printf("Arguments:\n");
-    printf("  DIRECTORY       Directory to analyze (default: current directory)\n\n");
+    printf("  PATH                One or more files or directories to analyze\n");
+    printf("                      (default: current directory if no paths given)\n");
+    printf("\n");
     printf("Examples:\n");
-    printf("  %s              Count bytes in current directory\n", prog_name);
-    printf("  %s /home/user   Count bytes in /home/user\n", prog_name);
-    printf("  %s -L /tmp      Count bytes in /tmp, following symlinks\n", prog_name);
+    printf("  %s                          Count bytes in current directory\n", prog_name);
+    printf("  %s -d 2 /home               Count bytes up to 2 levels deep\n", prog_name);
+    printf("  %s -n -s /var               Sort by name, then by size\n", prog_name);
+    printf("  %s -t -s -r /home           Dirs first, sort by size, then reverse all\n", prog_name);
+    printf("  %s -b *.txt                 Print only byte counts for all .txt files\n", prog_name);
+    printf("\n");
 }
 
-/* Recursive function to count bytes */
-long long count_bytes(const char *path) {
+/* Add sort type to sort order */
+void add_sort_order(int sort_type) {
+    if (sort_order.count >= sort_order.capacity) {
+        sort_order.capacity = sort_order.capacity ? sort_order.capacity * 2 : 4;
+        sort_order.order = (int *)realloc(sort_order.order, sort_order.capacity * sizeof(int));
+    }
+    sort_order.order[sort_order.count++] = sort_type;
+}
+
+/* Add result to results array */
+void add_result(const char *path, long long bytes, int is_dir) {
+    if (results.count >= results.capacity) {
+        results.capacity = results.capacity ? results.capacity * 2 : 16;
+        results.entries = (result_entry_t *)realloc(results.entries,
+                                                    results.capacity * sizeof(result_entry_t));
+    }
+
+    results.entries[results.count].path = strdup(path);
+    results.entries[results.count].bytes = bytes;
+    results.entries[results.count].is_dir = is_dir;
+    results.count++;
+}
+
+/* Compare functions for sorting */
+int compare_name(const void *a, const void *b) {
+    const result_entry_t *ea = (const result_entry_t *)a;
+    const result_entry_t *eb = (const result_entry_t *)b;
+    return strcmp(ea->path, eb->path);
+}
+
+int compare_type(const void *a, const void *b) {
+    const result_entry_t *ea = (const result_entry_t *)a;
+    const result_entry_t *eb = (const result_entry_t *)b;
+    if (ea->is_dir != eb->is_dir) {
+        return eb->is_dir - ea->is_dir;  /* Directories first */
+    }
+    return 0;  /* Maintain current order for same type */
+}
+
+int compare_size(const void *a, const void *b) {
+    const result_entry_t *ea = (const result_entry_t *)a;
+    const result_entry_t *eb = (const result_entry_t *)b;
+    if (ea->bytes > eb->bytes) return -1;  /* Largest first */
+    if (ea->bytes < eb->bytes) return 1;
+    return 0;
+}
+
+/* Sort results based on sort order */
+void sort_results(void) {
+    for (int i = 0; i < sort_order.count; i++) {
+        switch (sort_order.order[i]) {
+            case SORT_NAME:
+                qsort(results.entries, results.count, sizeof(result_entry_t), compare_name);
+                break;
+            case SORT_TYPE:
+                qsort(results.entries, results.count, sizeof(result_entry_t), compare_type);
+                break;
+            case SORT_SIZE:
+                qsort(results.entries, results.count, sizeof(result_entry_t), compare_size);
+                break;
+            case SORT_REVERSE:
+                for (size_t j = 0; j < results.count / 2; j++) {
+                    result_entry_t temp = results.entries[j];
+                    results.entries[j] = results.entries[results.count - 1 - j];
+                    results.entries[results.count - 1 - j] = temp;
+                }
+                break;
+        }
+    }
+}
+
+/* Add work item to queue */
+void enqueue_work(const char *path, int depth) {
+    work_item_t *item = (work_item_t *)malloc(sizeof(work_item_t));
+    if (!item) {
+        fprintf(stderr, "Memory allocation failed\n");
+        return;
+    }
+
+    item->path = strdup(path);
+    item->depth = depth;
+    item->next = NULL;
+
+    pthread_mutex_lock(&work_queue.mutex);
+
+    if (work_queue.tail) {
+        work_queue.tail->next = item;
+    } else {
+        work_queue.head = item;
+    }
+    work_queue.tail = item;
+
+    pthread_cond_signal(&work_queue.cond);
+    pthread_mutex_unlock(&work_queue.mutex);
+}
+
+/* Add bytes to total (thread-safe) */
+void add_bytes(long long bytes) {
+    pthread_mutex_lock(&work_queue.bytes_mutex);
+    work_queue.total_bytes += bytes;
+    pthread_mutex_unlock(&work_queue.bytes_mutex);
+}
+
+/* Process a directory */
+void process_directory(const char *path, int depth) {
+    DIR *dir;
+    struct dirent *entry;
+    char full_path[PATH_MAX];
+    long long dir_bytes = 0;
+
+    int dirfd = open(path, O_RDONLY | O_DIRECTORY);
+    if (dirfd == -1) {
+        if (!size_only) {
+            fprintf(stderr, "%sError opening directory '%s': %s%s\n",
+                    no_color ? "" : COLOR_ERROR,
+                    path,
+                    strerror(errno),
+                    no_color ? "" : COLOR_RESET);
+        }
+        return;
+    }
+
+    dir = fdopendir(dirfd);
+    if (dir == NULL) {
+        close(dirfd);
+        if (!size_only) {
+            fprintf(stderr, "%sError opening directory '%s': %s%s\n",
+                    no_color ? "" : COLOR_ERROR,
+                    path,
+                    strerror(errno),
+                    no_color ? "" : COLOR_RESET);
+        }
+        return;
+    }
+
+    /* Read directory entries */
+    while ((entry = readdir(dir)) != NULL) {
+        /* Skip . and .. */
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        /* Check each entry */
+        struct stat st;
+        int flags = follow_symlinks ? 0 : AT_SYMLINK_NOFOLLOW;
+
+        if (fstatat(dirfd, entry->d_name, &st, flags) == -1) {
+            if (!size_only) {
+                fprintf(stderr, "%sError accessing '%s/%s': %s%s\n",
+                        no_color ? "" : COLOR_ERROR,
+                        path, entry->d_name,
+                        strerror(errno),
+                        no_color ? "" : COLOR_RESET);
+            }
+            continue;
+        }
+
+        /* Count bytes for regular files */
+        if (S_ISREG(st.st_mode)) {
+            dir_bytes += st.st_size;
+        }
+        /* Queue directories for processing */
+        else if (S_ISDIR(st.st_mode) && (max_depth == -1 || depth < max_depth)) {
+            if (snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name) < sizeof(full_path)) {
+                enqueue_work(full_path, depth + 1);
+            } else if (!size_only) {
+                fprintf(stderr, "%sPath too long: %s/%s%s\n",
+                        no_color ? "" : COLOR_ERROR,
+                        path, entry->d_name,
+                        no_color ? "" : COLOR_RESET);
+            }
+        }
+    }
+
+    closedir(dir);  /* This also closes dirfd */
+
+    /* Always add bytes to total, even if 0 */
+    add_bytes(dir_bytes);
+}
+
+/* Worker thread function */
+void *worker_thread(void *arg) {
+    (void)arg;  /* Unused */
+
+    while (1) {
+        pthread_mutex_lock(&work_queue.mutex);
+
+        /* Wait for work or shutdown signal */
+        while (work_queue.head == NULL && !work_queue.shutdown) {
+            pthread_cond_wait(&work_queue.cond, &work_queue.mutex);
+        }
+
+        /* Check for shutdown */
+        if (work_queue.shutdown && work_queue.head == NULL) {
+            pthread_mutex_unlock(&work_queue.mutex);
+            break;
+        }
+
+        /* Get work item */
+        work_item_t *item = work_queue.head;
+        if (item) {
+            work_queue.head = item->next;
+            if (work_queue.head == NULL) {
+                work_queue.tail = NULL;
+            }
+            work_queue.active_workers++;
+        }
+
+        pthread_mutex_unlock(&work_queue.mutex);
+
+        if (item) {
+            /* Process the directory */
+            process_directory(item->path, item->depth);
+
+            free(item->path);
+            free(item);
+
+            /* Mark as idle */
+            pthread_mutex_lock(&work_queue.mutex);
+            work_queue.active_workers--;
+            /* If no more work and no active workers, signal others */
+            if (work_queue.head == NULL && work_queue.active_workers == 0) {
+                pthread_cond_broadcast(&work_queue.cond);
+            }
+            pthread_mutex_unlock(&work_queue.mutex);
+        }
+    }
+
+    return NULL;
+}
+
+/* Single-threaded recursive byte counting (for initial path) */
+long long count_bytes_sequential(const char *path, int depth) {
     struct stat st;
     struct dirent *entry;
     DIR *dir;
     char full_path[PATH_MAX];
     long long total_bytes = 0;
-    int stat_result;
-    
-    /* Use lstat or stat based on symlink flag */
+
+    /* For the initial path, we might need to use stat/lstat directly */
     if (follow_symlinks) {
-        stat_result = stat(path, &st);
+        if (stat(path, &st) == -1) {
+            if (!size_only) {
+                fprintf(stderr, "%sError accessing '%s': %s%s\n",
+                        no_color ? "" : COLOR_ERROR,
+                        path,
+                        strerror(errno),
+                        no_color ? "" : COLOR_RESET);
+            }
+            return 0;
+        }
     } else {
-        stat_result = lstat(path, &st);
+        if (lstat(path, &st) == -1) {
+            if (!size_only) {
+                fprintf(stderr, "%sError accessing '%s': %s%s\n",
+                        no_color ? "" : COLOR_ERROR,
+                        path,
+                        strerror(errno),
+                        no_color ? "" : COLOR_RESET);
+            }
+            return 0;
+        }
     }
-    
-    if (stat_result == -1) {
-        fprintf(stderr, "Error accessing '%s': %s\n", path, strerror(errno));
-        return 0;
-    }
-    
+
     /* If it's a regular file, return its size */
     if (S_ISREG(st.st_mode)) {
         return st.st_size;
     }
-    
-    /* If it's a directory, recurse into it */
-    if (S_ISDIR(st.st_mode)) {
-        dir = opendir(path);
-        if (dir == NULL) {
-            fprintf(stderr, "Error opening directory '%s': %s\n", path, strerror(errno));
+
+    /* If it's a directory and we haven't exceeded max depth, process it */
+    if (S_ISDIR(st.st_mode) && (max_depth == -1 || depth < max_depth)) {
+        int dirfd = open(path, O_RDONLY | O_DIRECTORY);
+        if (dirfd == -1) {
+            if (!size_only) {
+                fprintf(stderr, "%sError opening directory '%s': %s%s\n",
+                        no_color ? "" : COLOR_ERROR,
+                        path,
+                        strerror(errno),
+                        no_color ? "" : COLOR_RESET);
+            }
             return 0;
         }
-        
+
+        dir = fdopendir(dirfd);
+        if (dir == NULL) {
+            close(dirfd);
+            return 0;
+        }
+
         /* Read directory entries */
         while ((entry = readdir(dir)) != NULL) {
             /* Skip . and .. */
             if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
                 continue;
             }
-            
+
             /* Build full path */
             if (snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name) >= sizeof(full_path)) {
-                fprintf(stderr, "Path too long: %s/%s\n", path, entry->d_name);
+                if (!size_only) {
+                    fprintf(stderr, "%sPath too long: %s/%s%s\n",
+                            no_color ? "" : COLOR_ERROR,
+                            path,
+                            entry->d_name,
+                            no_color ? "" : COLOR_RESET);
+                }
                 continue;
             }
-            
+
             /* Recursively count bytes */
-            total_bytes += count_bytes(full_path);
+            total_bytes += count_bytes_sequential(full_path, depth + 1);
         }
-        
-        closedir(dir);
+
+        closedir(dir);  /* This also closes dirfd */
     }
-    /* If it's a symlink and we're not following them, size is 0 */
-    /* (already handled by not following the link) */
-    
+
     return total_bytes;
 }
 
@@ -94,12 +447,12 @@ void format_bytes(long long bytes, char *buffer, size_t buffer_size) {
     const char *units[] = {"B", "KB", "MB", "GB", "TB", "PB"};
     int unit_index = 0;
     double size = (double)bytes;
-    
+
     while (size >= 1024.0 && unit_index < 5) {
         size /= 1024.0;
         unit_index++;
     }
-    
+
     if (unit_index == 0) {
         snprintf(buffer, buffer_size, "%lld %s", bytes, units[0]);
     } else {
@@ -107,17 +460,122 @@ void format_bytes(long long bytes, char *buffer, size_t buffer_size) {
     }
 }
 
+/* Function to determine if path is a directory */
+int is_directory(const char *path) {
+    struct stat st;
+    if (stat(path, &st) == 0) {
+        return S_ISDIR(st.st_mode);
+    }
+    return 0;
+}
+
+/* Function to print size for a single path */
+void print_path_size(const char *path, long long bytes, int is_dir) {
+    char formatted_size[32];
+
+    if (size_only) {
+        printf("%lld\n", bytes);
+    } else {
+        format_bytes(bytes, formatted_size, sizeof(formatted_size));
+        printf("%s%-40s %s%10lld bytes%s (%s%s%s)\n",
+               no_color ? "" : (is_dir ? COLOR_DIR : COLOR_FILE),
+               path,
+               no_color ? "" : COLOR_SIZE,
+               bytes,
+               no_color ? "" : COLOR_RESET,
+               no_color ? "" : COLOR_SIZE,
+               formatted_size,
+               no_color ? "" : COLOR_RESET);
+    }
+}
+
+/* Function to print all results */
+void print_results(long long total_bytes) {
+    char formatted_size[32];
+
+    /* Print each result */
+    for (size_t i = 0; i < results.count; i++) {
+        print_path_size(results.entries[i].path,
+                       results.entries[i].bytes,
+                       results.entries[i].is_dir);
+    }
+
+    /* Print total if multiple paths and not in size-only mode */
+    if (results.count > 1 && !size_only) {
+        format_bytes(total_bytes, formatted_size, sizeof(formatted_size));
+        printf("%s%s\n", no_color ? "" : COLOR_BOLD, "----------------------------------------");
+        printf("Total:%34s %s%10lld bytes%s (%s%s%s)%s\n",
+               "",
+               no_color ? "" : COLOR_TOTAL,
+               total_bytes,
+               no_color ? "" : COLOR_RESET,
+               no_color ? "" : COLOR_TOTAL,
+               formatted_size,
+               no_color ? "" : COLOR_RESET,
+               no_color ? "" : COLOR_RESET);
+    }
+}
+
 int main(int argc, char *argv[]) {
     int opt;
-    char *target_dir = ".";  /* Default to current directory */
-    long long total_bytes;
-    char formatted_size[32];
-    
+    long long total_bytes = 0;
+    long long path_bytes;
+    int path_count = 0;
+    int i;
+    int error_occurred = 0;
+
+    /* Define long options */
+    static struct option long_options[] = {
+        {"follow",      no_argument,       0, 'f'},
+        {"no-color",    no_argument,       0, 'c'},
+        {"bytes-only",  no_argument,       0, 'b'},
+        {"max-depth",   required_argument, 0, 'd'},
+        {"threads",     required_argument, 0, 'j'},
+        {"sort-name",   no_argument,       0, 'n'},
+        {"sort-type",   no_argument,       0, 't'},
+        {"sort-size",   no_argument,       0, 's'},
+        {"reverse",     no_argument,       0, 'r'},
+        {"help",        no_argument,       0, 'h'},
+        {0, 0, 0, 0}
+    };
+
     /* Parse command line options */
-    while ((opt = getopt(argc, argv, "Lh")) != -1) {
+    while ((opt = getopt_long(argc, argv, "fcbd:j:ntsrh", long_options, NULL)) != -1) {
         switch (opt) {
-            case 'L':
+            case 'f':
                 follow_symlinks = 1;
+                break;
+            case 'c':
+                no_color = 1;
+                break;
+            case 'b':
+                size_only = 1;
+                break;
+            case 'd':
+                max_depth = atoi(optarg);
+                if (max_depth < 0) {
+                    fprintf(stderr, "Error: max-depth must be non-negative\n");
+                    return 1;
+                }
+                break;
+            case 'j':
+                num_threads = atoi(optarg);
+                if (num_threads < 1) {
+                    fprintf(stderr, "Error: threads must be positive\n");
+                    return 1;
+                }
+                break;
+            case 'n':
+                add_sort_order(SORT_NAME);
+                break;
+            case 't':
+                add_sort_order(SORT_TYPE);
+                break;
+            case 's':
+                add_sort_order(SORT_SIZE);
+                break;
+            case 'r':
+                add_sort_order(SORT_REVERSE);
                 break;
             case 'h':
                 print_usage(argv[0]);
@@ -127,23 +585,93 @@ int main(int argc, char *argv[]) {
                 return 1;
         }
     }
-    
-    /* Get target directory if specified */
-    if (optind < argc) {
-        target_dir = argv[optind];
+
+    /* Count paths provided */
+    path_count = argc - optind;
+
+    /* If no paths provided, use current directory */
+    if (path_count == 0) {
+        /* For single path, use sequential processing */
+        path_bytes = count_bytes_sequential(".", 0);
+        add_result(".", path_bytes, is_directory("."));
+        total_bytes = path_bytes;
+    } else {
+        /* Process each path provided */
+        for (i = optind; i < argc; i++) {
+            struct stat st;
+
+        /* Use lstat or stat based on symlink flag */
+        if ((follow_symlinks ? stat(argv[i], &st) : lstat(argv[i], &st)) == -1) {
+                if (!size_only) {
+                    fprintf(stderr, "%sError: Cannot access '%s': %s%s\n",
+                            no_color ? "" : COLOR_ERROR,
+                            argv[i],
+                            strerror(errno),
+                            no_color ? "" : COLOR_RESET);
+                }
+                error_occurred = 1;
+                continue;
+            }
+
+            /* For directories with multiple threads, use parallel processing */
+            if (S_ISDIR(st.st_mode) && num_threads > 1) {
+                /* Initialize work queue for this directory */
+                work_queue.total_bytes = 0;
+                work_queue.shutdown = 0;
+                work_queue.active_workers = 0;
+                work_queue.head = NULL;
+                work_queue.tail = NULL;
+
+                /* Queue initial directory BEFORE creating threads */
+                enqueue_work(argv[i], 0);
+
+                /* Create worker threads */
+                pthread_t *threads = (pthread_t *)malloc(num_threads * sizeof(pthread_t));
+                for (int t = 0; t < num_threads; t++) {
+                    pthread_create(&threads[t], NULL, worker_thread, NULL);
+                }
+
+                /* Wait for all work to complete */
+                pthread_mutex_lock(&work_queue.mutex);
+                while (work_queue.head != NULL || work_queue.active_workers > 0) {
+                    pthread_cond_wait(&work_queue.cond, &work_queue.mutex);
+                }
+                /* Signal shutdown */
+                work_queue.shutdown = 1;
+                pthread_cond_broadcast(&work_queue.cond);
+                pthread_mutex_unlock(&work_queue.mutex);
+
+                /* Wait for all threads to exit */
+                for (int t = 0; t < num_threads; t++) {
+                    pthread_join(threads[t], NULL);
+                }
+
+                free(threads);
+
+                /* Get bytes from parallel processing */
+                path_bytes = work_queue.total_bytes;
+            } else {
+                /* Use sequential processing for files or single-threaded mode */
+                path_bytes = count_bytes_sequential(argv[i], 0);
+            }
+
+            add_result(argv[i], path_bytes, S_ISDIR(st.st_mode));
+            total_bytes += path_bytes;
+        }
     }
-    
-    /* Check if target exists */
-    struct stat st;
-    if (stat(target_dir, &st) == -1) {
-        fprintf(stderr, "Error: Cannot access '%s': %s\n", target_dir, strerror(errno));
-        return 1;
+
+    /* Sort results if requested */
+    sort_results();
+
+    /* Print all results */
+    print_results(total_bytes);
+
+    /* Clean up */
+    for (size_t i = 0; i < results.count; i++) {
+        free(results.entries[i].path);
     }
-        
-    /* Format and display results */
-    total_bytes = count_bytes(target_dir);
-    format_bytes(total_bytes, formatted_size, sizeof(formatted_size));
-    printf("%lld bytes (%s)\n", total_bytes, formatted_size);
-    
-    return 0;
+    free(results.entries);
+    free(sort_order.order);
+
+    return error_occurred ? 1 : 0;
 }

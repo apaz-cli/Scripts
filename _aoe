@@ -18,23 +18,23 @@ MODELS = {
     # GPT by OpenAI
     'gm': 'gpt-4o-mini',
     'g': 'gpt-4o-2024-11-20',
-    
+
     # o1 by OpenAI
     'om': 'o1-mini',
     'o': 'o1',
-    
+
     # Claude by Anthropic
     'cm': 'claude-3-5-haiku-20241022',
     'C': 'claude-3-5-sonnet-20241022',
     'c': 'claude-3-5-sonnet-20240620',
-    
+
     'd': 'deepseek-chat',
-    
+
     # Llama by Meta
     'lm': 'meta-llama/llama-3.1-8b-instruct',
     'l': 'meta-llama/llama-3.3-70b-instruct',
     'L': 'meta-llama/llama-3.1-405b-instruct',
-    
+
     # Gemini by Google
     'i': 'gemini-2.0-flash-exp',
     'I': 'gemini-exp-1206'
@@ -49,13 +49,13 @@ def get_token(vendor: str) -> str:
         'deepseek': 'DEEPSEEK_API_KEY',
         'openrouter': 'OPENROUTER_API_KEY'
     }
-    
+
     # Check environment variable first
     if vendor in env_vars:
         token = os.getenv(env_vars[vendor])
         if token:
             return token
-    
+
     # Fallback to config file
     token_path = os.path.join(os.path.expanduser('~'), '.config', f'{vendor}.token')
     try:
@@ -74,7 +74,7 @@ async def openai_chat(message: str, *, system: str = None, model: str = None,
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": message})
-    
+
     response = await client.chat.completions.create(
         model=model,
         messages=messages,
@@ -82,7 +82,7 @@ async def openai_chat(message: str, *, system: str = None, model: str = None,
         max_tokens=max_tokens,
         stream=stream
     )
-    
+
     result = ""
     if stream:
         async for chunk in response:
@@ -91,7 +91,7 @@ async def openai_chat(message: str, *, system: str = None, model: str = None,
             result += text
     else:
         result = response.choices[0].message.content
-        
+
     return result
 
 async def anthropic_chat(message: str, *, system: str = None, model: str = None,
@@ -99,7 +99,7 @@ async def anthropic_chat(message: str, *, system: str = None, model: str = None,
                         stream: bool = True, **kwargs) -> str:
     """Anthropic chat completion"""
     client = anthropic.Anthropic(api_key=get_token('anthropic'))
-    
+
     response = await client.messages.create(
         model=model,
         max_tokens=max_tokens,
@@ -108,7 +108,7 @@ async def anthropic_chat(message: str, *, system: str = None, model: str = None,
         messages=[{"role": "user", "content": message}],
         stream=stream
     )
-    
+
     result = ""
     if stream:
         async for chunk in response:
@@ -117,7 +117,7 @@ async def anthropic_chat(message: str, *, system: str = None, model: str = None,
             result += text
     else:
         result = response.content[0].text
-        
+
     return result
 
 async def gemini_chat(message: str, *, system: str = None, model: str = None,
@@ -125,7 +125,7 @@ async def gemini_chat(message: str, *, system: str = None, model: str = None,
                      stream: bool = True, **kwargs) -> str:
     """Google Gemini chat completion"""
     client = GenerativeModel(model, api_key=get_token('google'))
-    
+
     response = await client.generate_content(
         message,
         generation_config={
@@ -134,7 +134,7 @@ async def gemini_chat(message: str, *, system: str = None, model: str = None,
         },
         stream=stream
     )
-    
+
     result = ""
     if stream:
         async for chunk in response:
@@ -143,7 +143,7 @@ async def gemini_chat(message: str, *, system: str = None, model: str = None,
             result += text
     else:
         result = response.text
-        
+
     return result
 
 async def deepseek_chat(message: str, *, system: str = None, model: str = None,
@@ -154,12 +154,12 @@ async def deepseek_chat(message: str, *, system: str = None, model: str = None,
         api_key=get_token('deepseek'),
         base_url="https://api.deepseek.com/v1"
     )
-    
+
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": message})
-    
+
     response = client.chat.completions.create(
         model="deepseek-chat",
         messages=messages,
@@ -167,7 +167,7 @@ async def deepseek_chat(message: str, *, system: str = None, model: str = None,
         max_tokens=max_tokens,
         stream=stream
     )
-    
+
     result = ""
     if stream:
         async for chunk in response:
@@ -176,7 +176,7 @@ async def deepseek_chat(message: str, *, system: str = None, model: str = None,
             result += text
     else:
         result = response.choices[0].message.content
-        
+
     return result
 
 async def meta_chat(message: str, *, system: str = None, model: str = None,
@@ -187,12 +187,12 @@ async def meta_chat(message: str, *, system: str = None, model: str = None,
         api_key=get_token('openrouter'),
         base_url="https://openrouter.ai/api/v1"
     )
-    
+
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": message})
-    
+
     response = await client.chat.completions.create(
         model=model,
         messages=messages,
@@ -203,7 +203,7 @@ async def meta_chat(message: str, *, system: str = None, model: str = None,
             "HTTP-Referer": "https://github.com/OpenRouterTeam/openrouter-examples"
         }
     )
-    
+
     result = ""
     if stream:
         async for chunk in response:
@@ -212,13 +212,13 @@ async def meta_chat(message: str, *, system: str = None, model: str = None,
             result += text
     else:
         result = response.choices[0].message.content
-        
+
     return result
 
 async def chat(model: str) -> Callable:
     """Factory function to create chat completion function based on model"""
     model = MODELS.get(model, model)
-    
+
     if model.startswith(('gpt', 'o1')):
         return openai_chat
     elif model.startswith('claude'):
@@ -258,20 +258,20 @@ def shorten_chunk(chunk: str, aggressive: bool = False, xml: bool = False) -> st
     lines = chunk.split('\n')
     if lines[0] in ('--show--', '//show//'):
         return '\n'.join(lines[1:])
-    
+
     if not aggressive:
         first_line = lines[0]
         is_first_line_comment = any(
-            first_line.strip().startswith(c) 
+            first_line.strip().startswith(c)
             for c in ('//', '--', '#')
         )
-        
+
         if is_first_line_comment:
             first_non_comment = next(
                 (line for line in lines if not any(
-                    line.strip().startswith(c) 
+                    line.strip().startswith(c)
                     for c in ('//', '--', '#')
-                )), 
+                )),
                 None
             )
             if first_non_comment:
@@ -311,11 +311,11 @@ async def load_context() -> List[CodeChunk]:
         else:
             print("Invalid .aoe.json config file, using defaults", file=sys.stderr)
         config = {'path': '.'}
-    
+
     files = await load_files(config['path'])
     context = []
     chunk_id = 0
-    
+
     for file in files:
         chunks = get_chunks(file['content'])
         for chunk in chunks:
@@ -325,7 +325,7 @@ async def load_context() -> List[CodeChunk]:
                 id=chunk_id
             ))
             chunk_id += 1
-    
+
     return context
 
 async def save_context(context: List[CodeChunk]):
@@ -335,31 +335,31 @@ async def save_context(context: List[CodeChunk]):
         if item.path not in file_map:
             file_map[item.path] = []
         file_map[item.path].append(item.chunk)
-    
+
     for file_path, chunks in file_map.items():
         content = '\n\n'.join(map(trimmer, chunks)) + '\n'
         with open(file_path, 'w') as f:
             f.write(content)
 
-def shorten_context(context: List[CodeChunk], shown_chunks: Dict[int, bool], 
+def shorten_context(context: List[CodeChunk], shown_chunks: Dict[int, bool],
                    aggressive: bool = False, xml: bool = False) -> str:
     """Generate shortened context"""
     result = []
     current_file = ''
-    
+
     for item in context:
         body = item.chunk if shown_chunks.get(item.id) else shorten_chunk(item.chunk, aggressive)
         if body:
             if item.path != current_file:
                 result.append(f"\n{item.path}:")
                 current_file = item.path
-            
+
             if xml:
                 result.append(f"<block id={item.id}>")
             result.append(body)
             if xml:
                 result.append("</block>")
-    
+
     return '\n'.join(result).strip()
 
 PICKER_SYSTEM = lambda codebase, chunks, query: f'''
@@ -470,13 +470,13 @@ async def process_chunks(chunks: List[CodeChunk], query: str, picker_model: str)
         f'<block id={c.id}>\n{long_chunk(c.chunk)}\n</block>'
         for c in chunks
     )
-    
+
     message = PICKER_MESSAGE(codebase, chunks_text, query)
     system = PICKER_SYSTEM(codebase, chunks_text, query)
-    
+
     chat_func = await chat(picker_model)
     response = await chat_func(message, system=system, system_cacheable=True, stream=False)
-    
+
     try:
         import re
         json_match = re.search(r'\{"changed":[^}]+\}', response)
@@ -484,17 +484,17 @@ async def process_chunks(chunks: List[CodeChunk], query: str, picker_model: str)
             print("No valid JSON found in response:", file=sys.stderr)
             print(response, file=sys.stderr)
             return {}
-        
+
         edit_decisions = json.loads(json_match.group(0))['changed']
     except Exception as e:
         print("Failed to parse JSON response:", e, file=sys.stderr)
         return {}
-    
+
     for chunk in chunks:
         if edit_decisions.get(str(chunk.id)):
             chunk_summary = shorten_chunk(chunk.chunk).split('\n')[0].strip()
             print('\x1b[2m' + f"#{chunk.id}: {chunk_summary}..." + '\x1b[0m')
-    
+
     return {
         str(item.id): {
             'chunk': item,
@@ -621,19 +621,19 @@ async def edit_chunks(chunks_to_edit: List[CodeChunk], query: str, editor_model:
         f'<block id={c.id}>\n{c.chunk}\n</block>'
         for c in chunks_to_edit
     )
-    
+
     message = EDITOR_MESSAGE(codebase, chunks_text, query)
     print("\x1b[1m# Editing the selected blocks...\x1b[0m")
-    
+
     chat_func = await chat(editor_model)
     response = await chat_func(message, system=EDITOR_SYSTEM, system_cacheable=True, stream=True)
-    
+
     import re
     refactored_chunks = {}
     for match in re.finditer(r'<block id=(\d+)>([\s\S]*?)</block>', response):
         id_, content = match.groups()
         refactored_chunks[id_] = content.strip()
-    
+
     return refactored_chunks
 
 def format_log(log: List[str]) -> str:
@@ -644,25 +644,25 @@ async def main():
     if len(sys.argv) < 2:
         print("Please provide a query as argument", file=sys.stderr)
         sys.exit(1)
-    
+
     query = sys.argv[1]
     picker_model = sys.argv[2] if len(sys.argv) > 2 else "d"
     editor_model = sys.argv[3] if len(sys.argv) > 3 else "c"
-    
+
     print(f"Picker-Model: {MODELS[picker_model]}")
     print(f"Editor-Model: {MODELS[editor_model]}")
-    
+
     global context
     context = await load_context()
-    
+
     print("\x1b[1m# Selecting relevant chunks...\x1b[0m")
-    
+
     # Create chunk groups
     chunk_groups = [
         context[i:i + GROUP_SIZE]
         for i in range(0, len(context), GROUP_SIZE)
     ]
-    
+
     # Process chunks either in parallel or sequentially
     if PARALLEL:
         chunk_picks = await asyncio.gather(
@@ -674,31 +674,31 @@ async def main():
         for group in chunk_groups:
             result = await process_chunks(group, query, picker_model)
             chunk_picks.append(result)
-    
+
     flattened_chunk_picks = {
         k: v
         for d in chunk_picks
         for k, v in d.items()
     }
-    
+
     # Get chunks that need editing
     chunks_to_edit = [
         result['chunk']
         for result in flattened_chunk_picks.values()
         if result['edit']
     ]
-    
+
     # Edit the chunks
     refactored_chunks = await edit_chunks(chunks_to_edit, query, editor_model)
-    
+
     # Update the context with refactored chunks
     for item in context:
         if str(item.id) in refactored_chunks:
             item.chunk = refactored_chunks[str(item.id)]
-    
+
     # Save the updated context back to files
     await save_context(context)
-    
+
     print("Refactoring completed and saved to files.")
     print(f"Total execution time: {time.time() - START_TIME:.2f} seconds")
 

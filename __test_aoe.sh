@@ -13,21 +13,21 @@ run_test() {
     setup="$2"
     query="$3"
     verify="$4"
-    
+
     echo "Running test: $name"
-    
+
     # Create test directory
     test_dir="/tmp/aoe_test_${name}"
     rm -rf "$test_dir"
     mkdir -p "$test_dir"
     cd "$test_dir"
-    
+
     # Run setup
     eval "$setup"
-    
+
     # Run aoe
     aoe "$query"
-    
+
     # Verify results
     if eval "$verify"; then
         echo "✓ Test passed: $name"

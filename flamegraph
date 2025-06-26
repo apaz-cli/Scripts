@@ -56,7 +56,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Fold and filter the perf data for the flamegrpah script
-perf script -i "$DATA" | "$REPO_PATH/stackcollapse-perf.pl" > "$FOLDED" 2>/dev/null 
+perf script -i "$DATA" | "$REPO_PATH/stackcollapse-perf.pl" > "$FOLDED" 2>/dev/null
 if [ $? -ne 0 ]; then
   echo "The stackcollapse-perf script failed."
   exit 1

@@ -4,7 +4,7 @@
 
 FIRE=$(pgrep firefox)
 if [ ! "$FIRE" = "" ]; then
-  for pid in $FIRE; do kill -s SIGTERM "$pid"; echo "Killed Firefox: $pid"; done  
+  for pid in $FIRE; do kill -s SIGTERM "$pid"; echo "Killed Firefox: $pid"; done
 fi
 
 CODE=$(pgrep -f  "code --unity-launch")

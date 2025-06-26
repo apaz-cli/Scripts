@@ -45,7 +45,8 @@ echo "Disabled hardware beep."
 
 # Thunar webp support
 echo -e '[Thumbnailer Entry]\nVersion=1.0\nEncoding=UTF-8\nType=X-Thumbnailer\nName=webp Thumbnailer\nMimeType=image/webp;\nExec=/usr/bin/convert -thumbnail %s %i %o' | sudo tee /usr/share/thumbnailers/webp.thumbnailer >/dev/null
-echo "Added webp support to Thunar."
+echo -e '[Thumbnailer Entry]\nTryExec=ffmpegthumbnailer\nExec=ffmpegthumbnailer -s %s -i %u -o %o -c png -f -t 10\nMimeType=video/flv;video/webm;video/mkv;video/mp4;video/mpeg;video/avi;video/ogg;video/quicktime;video/x-avi;video/x-flv;video/x-mp4;video/x-mpeg;video/x-webm;video/x-mkv;application/x-extension-webm;video/x-matroska;video/x-ms-wmv;video/x-msvideo;video/x-msvideo/avi;video/x-theora/ogg;video/x-theora/ogv;video/x-ms-asf;video/x-m4v;' | sudo tee /usr/share/thumbnailers/ffmpeg.thumbnailer >/dev/null
+echo "Added webp and mkv support to Thunar."
 
 # Replace the default XFCE panel blank icon and overwrite the audio icons.
 #cd ~
@@ -138,7 +139,7 @@ echo "Patched Vivaldi CSS."
 
 # Spotify
 #cd ~
-#curl -sS https://download.spotify.com/debian/pubkey_0D811D58.gpg | sudo apt-key add - 
+#curl -sS https://download.spotify.com/debian/pubkey_0D811D58.gpg | sudo apt-key add -
 #echo "deb http://repository.spotify.com stable non-free" | sudo tee /etc/apt/sources.list.d/spotify.list >/dev/null
 #sudo apt-get update && sudo apt-get install spotify-client
 #echo "Installed Spotify."

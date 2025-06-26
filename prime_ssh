@@ -2,7 +2,7 @@
 
 echo "curl -sSL https://apaz.dev/setup | PRIME=1 sh"
 echo "git clone https://github.com/primeintellect-ai/prime-rl && cd prime-rl"
-echo "apaz-cli $(ghp)"
+echo "apaz-cli  $(ghp)"
 echo
 echo "cd prime/"
 echo ". .venv/bin/activate"
