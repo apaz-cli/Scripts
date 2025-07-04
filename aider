@@ -4,6 +4,8 @@ CURRENT_WD="$(pwd)"
 PARENT_DIR="/tmp"
 AIDER_DIR="$PARENT_DIR/aider"
 AIDER_BIN="$AIDER_DIR/.venv/bin/aider"
+MODEL=""
+
 
 if [ ! -d "$AIDER_DIR" ]; then
     echo "Installing aider."
@@ -34,7 +36,10 @@ while [ "$#" -gt 0 ]; do
             echo "  -n, --no-conventions  Remove all conventions files (including the default)."
             echo "  -l, --lucy            Add the Lucy conventions file."
             echo "  -h, --help            Show this help message."
-            exit 0
+            ;;
+        -d|--deepseek)
+            MODEL="--model deepseek/deepseek-chat"
+            shift
             ;;
         -n|--no-conventions)
             DEFAULT_CONVENTIONS="false"
@@ -79,4 +84,4 @@ if [ "$LUCY_CONVENTIONS" = "true" ]; then
 fi
 
 # Finally run the command.
-$AIDER_BIN $ALL_CONVENTIONS --dark-mode "$@"
+$AIDER_BIN $ALL_CONVENTIONS $MODEL $HELP --dark-mode "$@"
