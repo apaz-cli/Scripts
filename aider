@@ -36,6 +36,12 @@ while [ "$#" -gt 0 ]; do
             echo "  -n, --no-conventions  Remove all conventions files (including the default)."
             echo "  -l, --lucy            Add the Lucy conventions file."
             echo "  -h, --help            Show this help message."
+            echo ""
+            if [ -f "$AIDER_BIN" ]; then
+                echo "Aider help:"
+                $AIDER_BIN --help
+            fi
+            exit 0
             ;;
         -d|--deepseek)
             MODEL="--model deepseek/deepseek-chat"
