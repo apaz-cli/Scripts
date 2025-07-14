@@ -1,0 +1,17 @@
+#!/bin/sh
+
+# Run hyfetch, installing if not available. It's like neofetch, but gayer.
+
+INSTALL_DIR="/tmp/gitingest"
+
+WD="$(pwd)"
+if [ ! -f "$INSTALL_DIR/bin/gitingest" ]; then
+  mkdir "$INSTALL_DIR/"
+  python -m venv "$INSTALL_DIR/" >/dev/null
+  cd "$INSTALL_DIR"
+  . bin/activate
+  bin/pip install gitingest >/dev/null 2>&1
+fi
+
+cd "$WD"
+"$INSTALL_DIR/bin/gitingest" "$@"

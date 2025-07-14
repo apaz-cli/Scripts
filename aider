@@ -90,4 +90,4 @@ if [ "$LUCY_CONVENTIONS" = "true" ]; then
 fi
 
 # Finally run the command.
-$AIDER_BIN $ALL_CONVENTIONS $MODEL $HELP --dark-mode "$@"
+$AIDER_BIN $ALL_CONVENTIONS $MODEL $HELP --cache-prompts --dark-mode "$@"

@@ -1,0 +1,65 @@
+#if 0
+TMP="$(mktemp -d)"; cc -o "$TMP/a.out" -x c "$0" && "$TMP/a.out" "$@"; RVAL=$?; rm -rf "$TMP"; exit $RVAL
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <ctype.h>
+
+#define BYTES_PER_LINE 12
+
+int main(int argc, char *argv[]) {
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s <filename>\n", argv[0]);
+        return 1;
+    }
+
+    FILE *fp = fopen(argv[1], "rb");
+    if (!fp) {
+        perror("Error opening file");
+        return 1;
+    }
+
+    // Get base filename from path
+    const char *filename = argv[1];
+    for (const char *p = argv[1]; *p; p++) {
+        if (*p == '/' || *p == '\\') {
+            filename = p + 1;
+        }
+    }
+
+    // Print array declaration with cleaned filename
+    printf("unsigned char ");
+    for (const char *p = filename; *p; p++) {
+        putchar(isalnum(*p) ? *p : '_');
+    }
+    printf("[] = {\n");
+
+    // Read and print file contents
+    unsigned char buf[BYTES_PER_LINE];
+    size_t bytes_read, total_bytes = 0;
+    int first = 1;
+
+    while ((bytes_read = fread(buf, 1, BYTES_PER_LINE, fp)) > 0) {
+        if (!first) printf(",\n");
+        first = 0;
+
+        printf("  ");
+        for (size_t i = 0; i < bytes_read; i++) {
+            if (i > 0) printf(", ");
+            printf("0x%02x", buf[i]);
+        }
+        total_bytes += bytes_read;
+    }
+
+    printf("\n};\nunsigned int ");
+
+    // Print length variable name
+    for (const char *p = filename; *p; p++) {
+        putchar(isalnum(*p) ? *p : '_');
+    }
+    printf("_len = %zu;\n", total_bytes);
+
+    fclose(fp);
+    return 0;
+}
