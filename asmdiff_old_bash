@@ -1,0 +1,114 @@
+#!/bin/bash
+
+# interactive-asm-diff.sh
+# Script to interactively compare assembly output between modifications of a C file
+# Usage: ./interactive-asm-diff.sh [source_file.c] [build_script [args...]]
+
+set -e
+
+# Create temp directory if it doesn't exist
+TMP_DIR="/tmp/asmdiff"
+mkdir -p "$TMP_DIR"
+
+# Default compile command
+DEFAULT_COMPILE_CMD="clang -S -O3 -march=skylake -mavx512f"
+
+# Check for source file argument
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 <source_file.c> [build_script [args...]]"
+    echo "Interactively compares assembly output after modifications to the source file"
+    exit 1
+fi
+
+SOURCE_FILE="$1"
+shift  # Remove the source file from the arguments
+
+# Check if the source file exists
+if [ ! -f "$SOURCE_FILE" ]; then
+    echo "Error: Source file $SOURCE_FILE does not exist"
+    exit 1
+fi
+
+# Determine if we're using a build script or default compilation
+if [ $# -ge 1 ]; then
+    BUILD_SCRIPT="$1"
+    shift  # Remove the build script from the arguments
+    BUILD_ARGS="$@"  # Remaining arguments are passed to the build script
+
+    if [ ! -f "$BUILD_SCRIPT" ] && ! command -v "$BUILD_SCRIPT" &> /dev/null; then
+        echo "Error: Build script $BUILD_SCRIPT does not exist or is not executable"
+        exit 1
+    fi
+
+    COMPILE_CMD="$BUILD_SCRIPT $BUILD_ARGS"
+    echo "Using custom build script: $COMPILE_CMD"
+else
+    COMPILE_CMD="$DEFAULT_COMPILE_CMD"
+    echo "Using default compilation: $COMPILE_CMD $SOURCE_FILE -o output.s"
+fi
+
+# Create a backup of the original file
+ORIGINAL_FILE="$TMP_DIR/original_$(basename "$SOURCE_FILE")"
+cp "$SOURCE_FILE" "$ORIGINAL_FILE"
+
+# Generate assembly for the original file
+ORIGINAL_ASM="$TMP_DIR/original_$(basename "$SOURCE_FILE" .c).s"
+
+if [ $# -ge 1 ]; then
+    # Using build script - run it on the original file
+    cp "$ORIGINAL_FILE" "$SOURCE_FILE"  # Make sure we're using the original
+    $COMPILE_CMD
+    # Assume the build script produces an output.s file, move it to our destination
+    if [ -f "output.s" ]; then
+        mv "output.s" "$ORIGINAL_ASM"
+    else
+        echo "Error: Build script did not produce an output.s file"
+        echo "Please ensure your build script generates assembly output"
+        exit 1
+    fi
+else
+    # Using default compilation
+    $COMPILE_CMD "$ORIGINAL_FILE" -o "$ORIGINAL_ASM"
+fi
+
+echo "Original assembly stored at: $ORIGINAL_ASM"
+echo "----------------------------------------"
+echo "Interactive assembly diff mode"
+echo "----------------------------------------"
+echo "Make changes to $SOURCE_FILE in your editor."
+echo "Press Enter to compile and view diff against original."
+echo "Press Ctrl+C to exit."
+echo "----------------------------------------"
+
+# Temporary file for the modified assembly
+MODIFIED_ASM="$TMP_DIR/modified_$(basename "$SOURCE_FILE" .c).s"
+
+# Main loop
+while true; do
+    read -p "Press Enter to compile and diff (Ctrl+C to exit)... "
+
+    echo "Compiling modified file..."
+
+    if [ $# -ge 1 ]; then
+        # Using build script
+        $COMPILE_CMD
+        if [ -f "output.s" ]; then
+            mv "output.s" "$MODIFIED_ASM"
+        else
+            echo "Error: Build script did not produce an output.s file"
+            continue
+        fi
+    else
+        # Using default compilation
+        $COMPILE_CMD "$SOURCE_FILE" -o "$MODIFIED_ASM"
+    fi
+
+    echo "Comparing assembly files..."
+    echo "Press 'q' to exit the diff viewer"
+
+    # Use diff with color and pipe to less with raw control characters
+    diff --color=always -U9999999999999999999 "$ORIGINAL_ASM" "$MODIFIED_ASM" | less -R
+
+    echo "Diff complete. Make more changes or press Ctrl+C to exit."
+done
+
