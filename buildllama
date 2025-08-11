@@ -80,15 +80,14 @@ def main():
     # Check for NVIDIA GPU
     has_nvidia = check_nvidia_smi()
 
+    # Build GPU version if NVIDIA GPU is available
     if has_nvidia:
         print_status("NVIDIA GPU detected, building with CUDA support...")
         cuda_arch = get_cuda_arch()
         print_status(f"CUDA architecture: {cuda_arch}")
 
-        # Build with CUDA
         run_cmd(f'cmake -B build -DCMAKE_CUDA_ARCHITECTURES="{cuda_arch}"')
-        build_cmd = f'cmake --build build --config Release -j {cpu_count}'
-        run_cmd(build_cmd)
+        run_cmd(f'cmake --build build --config Release -j {cpu_count}')
 
         # Test GPU build
         os.chdir("build/bin")
@@ -96,33 +95,29 @@ def main():
         print_status("GPU build test successful")
         os.chdir("../..")
 
-        # Build CPU version
+    # Build CPU version
+    cpu_build_dir = "cpubuild" if has_nvidia else "build"
+    if has_nvidia:
         print_status("Building CPU version...")
-        run_cmd("cmake -B cpubuild")
-        run_cmd(f"cmake --build cpubuild --config Release -j {cpu_count}")
-
-        # Test CPU build
-        os.chdir("cpubuild/bin")
-        run_cmd("./llama-server --help")
-        print_status("CPU build test successful")
-        os.chdir("../..")
-
     else:
         print_status("No NVIDIA GPU detected, building CPU-only version...")
-        run_cmd("cmake -B build")
-        run_cmd(f"cmake --build build --config Release -j {cpu_count}")
 
-        # Test build
-        os.chdir("build/bin")
-        run_cmd("./llama-server --help")
-        print_status("CPU build test successful")
-        os.chdir("../..")
+    run_cmd(f"cmake -B {cpu_build_dir}")
+    run_cmd(f"cmake --build {cpu_build_dir} --config Release -j {cpu_count}")
+
+    # Test CPU build
+    os.chdir(f"{cpu_build_dir}/bin")
+    run_cmd("./llama-server --help")
+    print_status("CPU build test successful")
+    os.chdir("../..")
 
     print()
     print_status("Build completed successfully!")
-    print(f"Binaries available in: \033[35m{os.getcwd()}/build/bin/\033[0m")
     if has_nvidia:
+        print(f"GPU binaries available in: \033[35m{os.getcwd()}/build/bin/\033[0m")
         print(f"CPU binaries available in: \033[35m{os.getcwd()}/cpubuild/bin/\033[0m")
+    else:
+        print(f"CPU binaries available in: \033[35m{os.getcwd()}/build/bin/\033[0m")
 
 if __name__ == "__main__":
     main()
