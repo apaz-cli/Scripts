@@ -18,6 +18,6 @@ echo "import torch;from torch import tensor" > $TMPF
 
 cd "$CURRENT_WD"
 
-"/tmp/$ENV_NAME/.venv/bin/ipython" -i "$TMPF" "$@"
+"/tmp/$ENV_NAME/.venv/bin/python" "$@"
 
 

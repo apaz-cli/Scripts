@@ -1,0 +1,264 @@
+#!/usr/bin/env python3
+"""
+Script to detect and comment out unused variables in C source files and header files.
+It compiles the file with warnings enabled, captures the unused variable
+warnings, and comments out those lines in the original file.
+"""
+
+import sys
+import os
+import re
+import subprocess
+import tempfile
+import argparse
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(description='Comment out unused variables in C source files and header files.')
+    parser.add_argument('file', help='C source file or header file to process')
+    parser.add_argument('--compiler', default='gcc', help='C compiler to use (default: gcc)')
+    parser.add_argument('--backup', action='store_true', help='Create a backup of the original file')
+    parser.add_argument('--dry-run', action='store_true', help='Show what would be changed without modifying files')
+    parser.add_argument('--include-path', '-I', action='append', help='Add include path for compilation', default=[])
+    return parser.parse_args()
+
+def get_unused_variable_lines(c_file, compiler, include_paths=None):
+    """Compile the file with warnings and extract lines with unused variables."""
+    # Create a temporary file to store the warnings
+    with tempfile.NamedTemporaryFile(mode='w+', delete=False) as temp_file:
+        temp_filename = temp_file.name
+
+    # For header files, create a temporary .c file that includes the header
+    is_header = c_file.lower().endswith(('.h', '.hpp', '.hxx', '.hh'))
+
+    if is_header:
+        with tempfile.NamedTemporaryFile(mode='w+', suffix='.c', delete=False) as temp_c_file:
+            temp_c_filename = temp_c_file.name
+            temp_c_file.write(f'#include "{os.path.abspath(c_file)}"\n')
+            temp_c_file.write('int main() { return 0; }\n')
+        process_file = temp_c_filename
+    else:
+        process_file = c_file
+
+    # Compile the file and redirect warnings to the temp file
+    # Using -Wunused-variable specifically for unused variables
+    compile_cmd = [
+        compiler,
+        "-Wall",
+        "-Wextra",
+        "-Wunused-variable",
+        "-c",
+        process_file,
+        "-o",
+        "/dev/null"
+    ]
+
+    # Add include paths if provided
+    if include_paths:
+        for path in include_paths:
+            compile_cmd.extend(['-I', path])
+
+    # Try to compile the file
+    try:
+        with open(temp_filename, 'w') as err_output:
+            subprocess.run(
+                compile_cmd,
+                stderr=err_output,
+                stdout=subprocess.PIPE,
+                check=False
+            )
+    except Exception as e:
+        print(f"Error during compilation: {e}", file=sys.stderr)
+        os.unlink(temp_filename)
+        if is_header and 'temp_c_filename' in locals():
+            os.unlink(temp_c_filename)
+        return {}
+
+    # Parse the warnings to extract line numbers with unused variables
+    unused_vars = {}
+
+    # More comprehensive patterns for different compilers and warning formats
+    # These patterns try to capture various ways compilers report unused variables
+    patterns = [
+        # Standard GCC pattern
+        re.compile(r'.*:(\d+):(\d+)?.* warning: unused variable [\'"]([^\'"]*)[\'"](.*)', re.IGNORECASE),
+        # Alternative GCC pattern
+        re.compile(r'.*:(\d+):(\d+)?.* warning: variable [\'"]([^\'"]*)[\'"](.*) set but not used', re.IGNORECASE),
+        # Clang pattern
+        re.compile(r'.*:(\d+):(\d+)?.* warning: unused variable [\'"]([^\'"]*)[\'"](.*)', re.IGNORECASE),
+        # Another Clang pattern
+        re.compile(r'.*:(\d+):(\d+)?.* warning: variable [\'"]([^\'"]*)[\'"](.*) is not used', re.IGNORECASE),
+        # Generic pattern (fallback)
+        re.compile(r'.*:(\d+).*: .*unused.*variable.*[\'"]([^\'"]*)[\'"](.*)', re.IGNORECASE),
+    ]
+
+    print(f"Checking for warnings in: {temp_filename}")
+    with open(temp_filename, 'r') as f:
+        for line in f:
+            line = line.strip()
+            matched = False
+
+            # Debug output for troubleshooting
+            if 'unused' in line.lower() and 'variable' in line.lower():
+                print(f"Found potential unused variable warning: {line}")
+
+            for pattern in patterns:
+                match = pattern.match(line)
+                if match:
+                    try:
+                        line_num = int(match.group(1))
+                        # Different patterns have different group counts
+                        if len(match.groups()) >= 3 and match.group(3) and '"' in match.group(3):
+                            var_name = match.group(3)
+                        elif len(match.groups()) >= 2:
+                            var_name = match.group(2)
+                        else:
+                            continue
+
+                        # Clean up the variable name
+                        var_name = var_name.strip('\'"')
+
+                        print(f"Found unused variable: {var_name} at line {line_num}")
+                        unused_vars[line_num] = var_name
+                        matched = True
+                        break
+                    except (IndexError, ValueError) as e:
+                        print(f"Error parsing warning: {e} in line: {line}")
+
+            # If no pattern matched but it looks like an unused variable warning
+            if not matched and 'unused variable' in line.lower():
+                # Try a more aggressive approach to extract information
+                file_line_match = re.search(r'([^:]+):(\d+):', line)
+                var_match = re.search(r'unused variable [\'"]([^\'"]*)[\'"]', line)
+
+                if file_line_match and var_match:
+                    try:
+                        line_num = int(file_line_match.group(2))
+                        var_name = var_match.group(1)
+                        print(f"Fallback match - Found unused variable: {var_name} at line {line_num}")
+                        unused_vars[line_num] = var_name
+                    except (IndexError, ValueError) as e:
+                        print(f"Error in fallback parsing: {e} in line: {line}")
+
+    # Clean up the temporary files
+    os.unlink(temp_filename)
+
+    # Clean up the temporary C file if we created one for a header
+    if is_header and 'temp_c_filename' in locals():
+        os.unlink(temp_c_filename)
+
+    return unused_vars
+
+def comment_out_unused_variables(c_file, unused_vars, create_backup=False, dry_run=False):
+    """Comment out lines with unused variables and optionally create a backup."""
+    if not unused_vars:
+        print(f"No unused variables found in {c_file}")
+        return
+
+    # Create a backup if requested
+    if create_backup and not dry_run:
+        backup_file = f"{c_file}.bak"
+        try:
+            with open(c_file, 'r') as src, open(backup_file, 'w') as dst:
+                dst.write(src.read())
+            print(f"Created backup at {backup_file}")
+        except Exception as e:
+            print(f"Error creating backup: {e}", file=sys.stderr)
+            return
+
+    # Read the file content
+    try:
+        with open(c_file, 'r') as f:
+            lines = f.readlines()
+    except Exception as e:
+        print(f"Error reading file {c_file}: {e}", file=sys.stderr)
+        return
+
+    # Comment out the lines with unused variables
+    modified_lines = []
+    total_changes = 0
+
+    for i, line in enumerate(lines):
+        line_num = i + 1
+        if line_num in unused_vars:
+            # Make sure the variable is actually on this line
+            var_name = unused_vars[line_num]
+
+            # We need to be careful to only comment out the variable declaration,
+            # not the entire line in case it has multiple declarations
+            if var_name in line:
+                # Basic check for a pattern that looks like a variable declaration
+                var_pattern = re.compile(r'([\w\s\*]+\s+)(' + re.escape(var_name) + r')(\s*[=,;].*)')
+                var_match = var_pattern.search(line)
+
+                if var_match:
+                    # Comment out just the variable
+                    before = var_match.group(1)
+                    variable = var_match.group(2)
+                    after = var_match.group(3)
+
+                    # If there's a comma, it might be part of a multi-variable declaration
+                    if ',' in after:
+                        new_line = f"{before}/* {variable} */{after}"
+                    else:
+                        new_line = f"// {line.rstrip()}\n"
+
+                    if dry_run:
+                        print(f"Line {line_num}: Would comment out variable '{var_name}'")
+                        print(f"  Old: {line.rstrip()}")
+                        print(f"  New: {new_line.rstrip()}")
+
+                    modified_lines.append(new_line)
+                    total_changes += 1
+                else:
+                    # If we can't identify the exact pattern, comment the whole line
+                    new_line = f"// {line.rstrip()}\n"
+
+                    if dry_run:
+                        print(f"Line {line_num}: Would comment out entire line containing '{var_name}'")
+                        print(f"  Old: {line.rstrip()}")
+                        print(f"  New: {new_line.rstrip()}")
+
+                    modified_lines.append(new_line)
+                    total_changes += 1
+            else:
+                modified_lines.append(line)
+        else:
+            modified_lines.append(line)
+
+    # Write the modified content back to the file
+    if not dry_run:
+        try:
+            with open(c_file, 'w') as f:
+                f.writelines(modified_lines)
+            print(f"Commented out {total_changes} unused variable{'s' if total_changes != 1 else ''} in {c_file}")
+        except Exception as e:
+            print(f"Error writing to file {c_file}: {e}", file=sys.stderr)
+    else:
+        print(f"Dry run: Would have commented out {total_changes} unused variable{'s' if total_changes != 1 else ''} in {c_file}")
+
+def main():
+    args = parse_arguments()
+
+    if not os.path.isfile(args.file):
+        print(f"Error: File '{args.file}' not found", file=sys.stderr)
+        return 1
+
+    # Check if the compiler exists
+    try:
+        subprocess.run([args.compiler, "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    except FileNotFoundError:
+        print(f"Error: Compiler '{args.compiler}' not found", file=sys.stderr)
+        return 1
+
+    print(f"Processing {args.file} with {args.compiler}...")
+
+    # Get unused variables
+    unused_vars = get_unused_variable_lines(args.file, args.compiler, args.include_path)
+
+    # Comment them out
+    comment_out_unused_variables(args.file, unused_vars, args.backup, args.dry_run)
+
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
