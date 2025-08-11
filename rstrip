@@ -53,9 +53,8 @@ def is_text_file(filepath: Path) -> bool:
         return True
 
     # Files without extension that are usually text
-    if filepath.name in {'Makefile', 'Dockerfile', 'Jenkinsfile', 'Rakefile',
+    if filepath.name in {'Makefile', 'Dockerfile', 'README',
                          'Gemfile', 'Guardfile', 'Capfile', 'Thorfile', 'Vagrantfile',
-                         'Berksfile', 'Cheffile', 'Jugfile', 'Procfile', 'README',
                          'LICENSE', 'CHANGELOG', 'AUTHORS', 'CONTRIBUTORS', 'TODO',
                          'INSTALL', 'NEWS', 'HISTORY', 'NOTICE', 'MANIFEST'}:
         return True
@@ -282,8 +281,6 @@ def main():
                 if modified:
                     print(f"{Colors.GREEN}✓ Stripped trailing whitespace from: {path}{Colors.RESET}")
                     all_modified_files.append((path, None))
-                else:
-                    print(f"No changes needed for: {path}")
 
             all_results.append((path, modified, output))
 
@@ -312,8 +309,6 @@ def main():
                 if modified_files:
                     for filepath, _ in modified_files:
                         print(f"{Colors.GREEN}✓ Stripped: {filepath}{Colors.RESET}")
-                else:
-                    print(f"No files needed modification in {path}.")
 
             # Summary for this directory
             total_files = len(results)
@@ -321,7 +316,6 @@ def main():
 
     # Overall summary
     if len(args.paths) > 1:
-        print(f"\n{Colors.BOLD}Overall Summary:{Colors.RESET}")
         if args.dry:
             if all_modified_files:
                 print(f"{Colors.YELLOW}Would strip trailing whitespace from {len(all_modified_files)} file(s) total{Colors.RESET}")

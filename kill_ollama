@@ -9,5 +9,5 @@ fi
 
 for MODEL in $LOADED_MODELS; do
     echo "Killing model $MODEL"
-    curl http://localhost:11434/api/generate -d "{\"model\": \"$MODEL\", \"keep_alive\": 0}" >/dev/null
+    curl http://localhost:11434/api/generate -d "{\"model\": \"$MODEL\", \"keep_alive\": 0}" >/dev/null 2>/dev/null
 done

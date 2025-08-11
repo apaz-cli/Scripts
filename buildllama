@@ -58,17 +58,8 @@ def main():
     os.chdir("/tmp")
     if os.path.exists("llama.cpp"):
         shutil.rmtree("llama.cpp")
-    run_cmd("git clone https://github.com/ggerganov/llama.cpp.git")
+    run_cmd("git clone --depth 1 https://github.com/ggerganov/llama.cpp.git")
     os.chdir("llama.cpp")
-
-    # Check required paths
-    paths = ["build-xcframework.sh", "CMakeLists.txt", "ggml", "src/"]
-    print_status("Checking required paths...")
-    for path in paths:
-        if not os.path.exists(path):
-            print(f"Required path not found: {path}")
-            sys.exit(1)
-    print_status("All required paths found")
 
     # Check and install cmake
     check_cmake()
