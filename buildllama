@@ -23,7 +23,7 @@ def print_status(msg):
 def check_nvidia_smi():
     """Check if nvidia-smi is available"""
     try:
-        result = subprocess.run(["nvidia-smi", "--query-gpu=compute_cap", "--format=csv"], 
+        result = subprocess.run(["nvidia-smi", "--query-gpu=compute_cap", "--format=csv"],
                               capture_output=True, text=True)
         return result.returncode == 0
     except FileNotFoundError:
@@ -38,7 +38,7 @@ def check_cmake():
     """Check if cmake is installed, install if needed"""
     try:
         subprocess.run(["cmake", "--version"], capture_output=True, check=True)
-        print("cmake is already installed")
+        print_status("cmake is already installed")
     except (FileNotFoundError, subprocess.CalledProcessError):
         print("cmake not found, attempting to install...")
         if shutil.which("apt"):
@@ -54,74 +54,75 @@ def get_cpu_count():
 
 def main():
     # Clone llama.cpp repo
-    print("Cloning llama.cpp repository...")
+    print_status("Cloning llama.cpp repository...")
     os.chdir("/tmp")
     if os.path.exists("llama.cpp"):
         shutil.rmtree("llama.cpp")
     run_cmd("git clone https://github.com/ggerganov/llama.cpp.git")
     os.chdir("llama.cpp")
-    
+
     # Check required paths
     paths = ["build-xcframework.sh", "CMakeLists.txt", "ggml", "src/"]
-    print("Checking required paths...")
+    print_status("Checking required paths...")
     for path in paths:
         if not os.path.exists(path):
             print(f"Required path not found: {path}")
             sys.exit(1)
-    print("All required paths found")
-    
+    print_status("All required paths found")
+
     # Check and install cmake
     check_cmake()
-    
+
     # Get CPU count for parallel build
     cpu_count = get_cpu_count()
-    print(f"Using {cpu_count} cores for build")
-    
+    print_status(f"Using {cpu_count} cores for build")
+
     # Check for NVIDIA GPU
     has_nvidia = check_nvidia_smi()
-    
+
     if has_nvidia:
-        print("NVIDIA GPU detected, building with CUDA support...")
+        print_status("NVIDIA GPU detected, building with CUDA support...")
         cuda_arch = get_cuda_arch()
-        print(f"CUDA architecture: {cuda_arch}")
-        
+        print_status(f"CUDA architecture: {cuda_arch}")
+
         # Build with CUDA
         run_cmd(f'cmake -B build -DCMAKE_CUDA_ARCHITECTURES="{cuda_arch}"')
         build_cmd = f'cmake --build build --config Release -j {cpu_count}'
         run_cmd(build_cmd)
-        
+
         # Test GPU build
         os.chdir("build/bin")
         run_cmd("./llama-server --help")
         print_status("GPU build test successful")
         os.chdir("../..")
-        
+
         # Build CPU version
-        print("Building CPU version...")
+        print_status("Building CPU version...")
         run_cmd("cmake -B cpubuild")
         run_cmd(f"cmake --build cpubuild --config Release -j {cpu_count}")
-        
+
         # Test CPU build
         os.chdir("cpubuild/bin")
         run_cmd("./llama-server --help")
         print_status("CPU build test successful")
         os.chdir("../..")
-        
+
     else:
-        print("No NVIDIA GPU detected, building CPU-only version...")
+        print_status("No NVIDIA GPU detected, building CPU-only version...")
         run_cmd("cmake -B build")
         run_cmd(f"cmake --build build --config Release -j {cpu_count}")
-        
+
         # Test build
         os.chdir("build/bin")
         run_cmd("./llama-server --help")
         print_status("CPU build test successful")
         os.chdir("../..")
-    
+
+    print()
     print_status("Build completed successfully!")
-    print(f"Binaries available in: {os.getcwd()}/build/bin/")
+    print(f"Binaries available in: \033[35m{os.getcwd()}/build/bin/\033[0m")
     if has_nvidia:
-        print(f"CPU binaries available in: {os.getcwd()}/cpubuild/bin/")
+        print(f"CPU binaries available in: \033[35m{os.getcwd()}/cpubuild/bin/\033[0m")
 
 if __name__ == "__main__":
     main()
