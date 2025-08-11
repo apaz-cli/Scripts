@@ -82,8 +82,8 @@ def main():
         print(f"CUDA architecture: {cuda_arch}")
         
         # Build with CUDA
-        run_cmd("cmake -B build")
-        build_cmd = f'cmake --build build --config Release -j {cpu_count} -DCMAKE_CUDA_ARCHITECTURES="{cuda_arch}"'
+        run_cmd(f'cmake -B build -DCMAKE_CUDA_ARCHITECTURES="{cuda_arch}"')
+        build_cmd = f'cmake --build build --config Release -j {cpu_count}'
         run_cmd(build_cmd)
         
         # Test GPU build
