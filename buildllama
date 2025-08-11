@@ -31,7 +31,7 @@ def check_nvidia_smi():
 
 def get_cuda_arch():
     """Get CUDA architecture from nvidia-smi"""
-    result = run_cmd('nvidia-smi --query-gpu=compute_cap --format=csv | tac | head -n1 | cut -b 2 --complement')
+    result = run_cmd('nvidia-smi --query-gpu=compute_cap --format=csv | tac | head -n1 | tr -d "."')
     return result.stdout.strip()
 
 def check_cmake():
