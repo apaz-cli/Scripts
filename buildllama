@@ -115,10 +115,10 @@ def main():
         # Test build
         os.chdir("build/bin")
         run_cmd("./llama-server --help")
-        print("CPU build test successful")
+        print_status("CPU build test successful")
         os.chdir("../..")
     
-    print("Build completed successfully!")
+    print_status("Build completed successfully!")
     print(f"Binaries available in: {os.getcwd()}/build/bin/")
     if has_nvidia:
         print(f"CPU binaries available in: {os.getcwd()}/cpubuild/bin/")
