@@ -7,7 +7,7 @@ import shutil
 
 def run_cmd(cmd, check=True, shell=True):
     """Run a command and return the result"""
-    print(f"Running: {cmd}")
+    print(f"Running: \033[35m{cmd}\033[0m")
     result = subprocess.run(cmd, shell=shell, capture_output=True, text=True)
     if check and result.returncode != 0:
         print(f"Command failed: {cmd}")
@@ -15,6 +15,10 @@ def run_cmd(cmd, check=True, shell=True):
         print(f"stderr: {result.stderr}")
         sys.exit(1)
     return result
+
+def print_status(msg):
+    """Print status message in yellow"""
+    print(f"\033[33m{msg}\033[0m")
 
 def check_nvidia_smi():
     """Check if nvidia-smi is available"""
@@ -89,7 +93,7 @@ def main():
         # Test GPU build
         os.chdir("build/bin")
         run_cmd("./llama-server --help")
-        print("GPU build test successful")
+        print_status("GPU build test successful")
         os.chdir("../..")
         
         # Build CPU version
@@ -100,7 +104,7 @@ def main():
         # Test CPU build
         os.chdir("cpubuild/bin")
         run_cmd("./llama-server --help")
-        print("CPU build test successful")
+        print_status("CPU build test successful")
         os.chdir("../..")
         
     else:
