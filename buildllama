@@ -73,6 +73,7 @@ def main():
 
     # Build GPU version if NVIDIA GPU is available
     if has_nvidia:
+        print()
         print_status("NVIDIA GPU detected, building with CUDA support...")
         cuda_arch = get_cuda_arch()
         print_status(f"CUDA architecture: {cuda_arch}")
@@ -87,6 +88,7 @@ def main():
         os.chdir("../..")
 
     # Build CPU version
+    print()
     cpu_build_dir = "cpubuild" if has_nvidia else "build"
     if has_nvidia:
         print_status("Building CPU version...")
@@ -112,5 +114,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
