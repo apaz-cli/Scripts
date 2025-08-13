@@ -35,6 +35,8 @@ while [ "$#" -gt 0 ]; do
             echo "Options:"
             echo "  -n, --no-conventions  Remove all conventions files (including the default)."
             echo "  -l, --lucy            Add the Lucy conventions file."
+            echo "  -d, --deepseek        Use DeepSeek model."
+            echo "  -o, --opus            Use Claude Opus model."
             echo "  -h, --help            Show this help message."
             echo ""
             if [ -f "$AIDER_BIN" ]; then
@@ -45,6 +47,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         -d|--deepseek)
             MODEL="--model deepseek/deepseek-chat"
+            shift
+            ;;
+        -o|--opus)
+            MODEL="--model claude-opus-4-20250514"
             shift
             ;;
         -n|--no-conventions)
