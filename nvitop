@@ -1,0 +1,19 @@
+#!/bin/sh
+
+cd /tmp/
+INSTALL=0
+if [ ! -d nvitop_venv/ ]; then
+    INSTALL=1
+    mkdir nvitop_venv/
+fi
+cd nvitop_venv/
+
+if [ $INSTALL -eq 1 ]; then
+    python3 -m venv .venv
+    . .venv/bin/activate
+    pip install nvitop
+else
+    . .venv/bin/activate
+fi
+
+nvitop "$@"
