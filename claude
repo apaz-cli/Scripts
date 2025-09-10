@@ -1,3 +1,11 @@
 #!/bin/sh
 
-/home/apaz/.claude/local/claude #--model openai/gpt-oss-20b
+if ! command -v npm --help >/dev/null; then
+  sudo apt install -y npm
+fi
+
+if [ "$(npm list -g @anthropic-ai/claude-code | grep claude-code)" = "claude-code" ]; then
+  sudo npm install -g @anthropic-ai/claude-code
+fi
+
+~/.claude/local/claude "$@"
