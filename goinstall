@@ -1,5 +1,6 @@
 #!/bin/sh
 
+cd /tmp/
 if which go >/dev/null; then
   echo "A go installation already exists."
   exit 1
