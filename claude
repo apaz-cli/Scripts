@@ -4,7 +4,7 @@ if ! command -v npm --help >/dev/null; then
   sudo apt install -y npm
 fi
 
-if [ "$(npm list -g @anthropic-ai/claude-code | grep claude-code)" = "claude-code" ]; then
+if ! npm list -g @anthropic-ai/claude-code | grep -q claude-code >/dev/null; then
   sudo npm install -g @anthropic-ai/claude-code
 fi
 
