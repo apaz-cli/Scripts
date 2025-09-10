@@ -1,0 +1,18 @@
+#!/bin/sh
+
+cd /tmp
+if [ ! -d prime-cli/ ]; then
+  git clone https://github.com/PrimeIntellect-ai/prime-cli
+fi
+cd prime-cli/
+
+if [ ! -d ".venv/" ]; then
+  python -m venv .venv/
+  CONT="1"
+fi
+. .venv/bin/activate
+if [ "$CONT" = "1" ]; then
+  pip install -e ".[dev]"
+fi
+
+. .venv/bin/prime $@
