@@ -1,11 +1,7 @@
 #!/bin/sh
 
-if ! command -v npm --help >/dev/null; then
-  sudo apt install -y npm
+if [ ! -f ~/.local/bin/claude ]; then
+  curl -fsSL https://claude.ai/install.sh | bash
 fi
 
-if ! npm list -g @anthropic-ai/claude-code | grep -q claude-code >/dev/null; then
-  sudo npm install -g @anthropic-ai/claude-code
-fi
-
-~/.claude/local/claude "$@"
+~/.local/bin/claude "$@"
