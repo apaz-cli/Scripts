@@ -1,0 +1,9 @@
+#!/bin/sh
+
+if which go >/dev/null; then
+  echo "A go installation already exists."
+  exit 1
+fi
+
+curl -SsL https://dl.google.com/go/go1.25.1.linux-amd64.tar.gz -o go1.25.1.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.25.1.linux-amd64.tar.gz
