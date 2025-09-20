@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+import gzip
+import json
+
+def get_schema(obj, prefix=""):
+    schema = {}
+
+    for key, value in obj.items():
+        full_key = f"{prefix}.{key}" if prefix else key
+
+        if isinstance(value, dict):
+            schema.update(get_schema(value, full_key))
+        elif isinstance(value, list):
+            schema[full_key] = f"list[{len(value)}]"
+            i, item = 0, value[0]
+            if isinstance(item, dict):
+                schema.update(get_schema(item, f"{full_key}[]"))
+        else:
+            schema[full_key] = type(value).__name__
+
+    return schema
+
+def print_json_schema(file_path):
+
+    open_func = open
+    pop_ext = file_path
+    if pop_ext.endswith('.gz'):
+        open_func = gzip.open
+        pop_ext = pop_ext[:-3]
+
+    fl = pop_ext.endswith('.jsonl')
+
+    with open_func(file_path, 'rt') as f:
+        payload = f.readline().strip() if fl else f.read().strip()
+        json_obj = json.loads(payload)
+
+        for key, data_type in get_schema(json_obj).items():
+            YELLOW = '\033[93m'
+            CYAN = '\033[96m'
+            RESET = '\033[0m'
+            print(f"{YELLOW}{key}{RESET}: {CYAN}{data_type}{RESET}")
+
+if __name__ == "__main__":
+    import sys
+    file_path = sys.argv[1]
+    print_json_schema(file_path)

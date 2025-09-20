@@ -1,0 +1,123 @@
+#if 0
+TMP="$(mktemp -d)"; cc -o "$TMP/a.out" -x c "$0" && "$TMP/a.out" "$@"; RVAL=$?; rm -rf "$TMP"; exit $RVAL
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+
+#define BUFFER_SIZE 8192
+
+int main(int argc, char *argv[]) {
+    if (argc != 4) {
+        fprintf(stderr, "Usage: %s <input_file> <output_file1> <output_file2>\n", argv[0]);
+        return 1;
+    }
+
+    const char *input_file = argv[1];
+    const char *output_file1 = argv[2];
+    const char *output_file2 = argv[3];
+
+    // Open input file for reading
+    FILE *input = fopen(input_file, "r");
+    if (!input) {
+        perror("Error opening input file");
+        return 1;
+    }
+
+    // Buffer for reading chunks
+    char buffer[BUFFER_SIZE];
+    
+    // First pass: count total lines
+    int total_lines = 0;
+    size_t bytes_read;
+    int last_char = '\0';
+    
+    while ((bytes_read = fread(buffer, 1, BUFFER_SIZE, input)) > 0) {
+        for (size_t i = 0; i < bytes_read; i++) {
+            if (buffer[i] == '\n') {
+                total_lines++;
+            }
+            last_char = buffer[i];
+        }
+    }
+    
+    // Handle case where file doesn't end with newline
+    if (last_char != '\n' && last_char != '\0') {
+        total_lines++;
+    }
+
+    if (total_lines == 0) {
+        fprintf(stderr, "Input file is empty or has no lines\n");
+        fclose(input);
+        return 1;
+    }
+
+    int first_half_lines = (total_lines + 1) / 2;  // Round up for odd number of lines
+    
+    // Reset to beginning for second pass
+    fseek(input, 0, SEEK_SET);
+
+    // Open first output file
+    FILE *output1 = fopen(output_file1, "w");
+    if (!output1) {
+        perror("Error opening first output file");
+        fclose(input);
+        return 1;
+    }
+
+    // Second pass: write first half and find split point
+    int current_line = 0;
+    long split_position = 0;
+    long current_position = 0;
+    
+    while ((bytes_read = fread(buffer, 1, BUFFER_SIZE, input)) > 0) {
+        for (size_t i = 0; i < bytes_read; i++) {
+            if (current_line < first_half_lines) {
+                fputc(buffer[i], output1);
+            }
+            
+            if (buffer[i] == '\n') {
+                current_line++;
+                if (current_line == first_half_lines) {
+                    split_position = current_position + i + 1;
+                }
+            }
+        }
+        current_position += bytes_read;
+        
+        // Early exit if we've written all first half lines
+        if (current_line >= first_half_lines) {
+            break;
+        }
+    }
+    
+    fclose(output1);
+
+    // Open second output file
+    FILE *output2 = fopen(output_file2, "w");
+    if (!output2) {
+        perror("Error opening second output file");
+        fclose(input);
+        return 1;
+    }
+
+    // Seek to split position and write second half
+    fseek(input, split_position, SEEK_SET);
+    
+    while ((bytes_read = fread(buffer, 1, BUFFER_SIZE, input)) > 0) {
+        fwrite(buffer, 1, bytes_read, output2);
+    }
+
+    // Clean up
+    fclose(output2);
+    fclose(input);
+
+    printf("Split complete:\n");
+    printf("  First %d lines -> %s\n", first_half_lines, output_file1);
+    printf("  Last %d lines -> %s\n", total_lines - first_half_lines, output_file2);
+
+    return 0;
+}
