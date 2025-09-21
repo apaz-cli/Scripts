@@ -410,6 +410,7 @@ int main(int argc, char **argv) {
     torture_gpu();
 #else
     fprintf(stderr, "GPU torture not available (compiled without CUDA support)\n");
+    exit(1);
 #endif
   }
 
