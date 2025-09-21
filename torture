@@ -354,53 +354,12 @@ int main(int argc, char **argv) {
     mem_bytes = ONE_GB;
   }
 
-  pthread_t gpu_threads[16]; // Support up to 16 GPUs
-  GPUThreadArg gpu_thread_args[16];
-  int gpu_thread_count = 0;
-
   if (run_gpu) {
-    // Initialize CUDA
-    int deviceCount;
-    cudaError_t err = cudaGetDeviceCount(&deviceCount);
-    if (err != cudaSuccess) {
-      fprintf(stderr, "CUDA error getting device count: %s\n",
-              cudaGetErrorString(err));
-      return 1;
-    }
-    if (deviceCount == 0) {
-      fprintf(stderr, "No CUDA devices found\n");
-      return 1;
-    }
-
-    // Check each GPU and create threads for those with enough memory
-    for (int i = 0; i < deviceCount; i++) {
-      if (has_enough_memory(i, 5.0)) { // Require at least 5GB of memory
-        gpu_thread_args[gpu_thread_count].device_id = i;
-
-        if (pthread_create(&gpu_threads[gpu_thread_count], NULL,
-                          launch_gpu_torture, &gpu_thread_args[gpu_thread_count]) != 0) {
-          fprintf(stderr, "Failed to create GPU torture thread for device %d\n", i);
-          return 1;
-        }
-        gpu_thread_count++;
-      } else {
-        // Get device properties to show name in the skip message
-        cudaDeviceProp prop;
-        if (cudaGetDeviceProperties(&prop, i) == cudaSuccess) {
-          double memory_gb = (double)prop.totalGlobalMem / ONE_GB;
-          printf("Skipping GPU %d: %s (%.2f GB memory) - less than 5GB required\n",
-                 i, prop.name, memory_gb);
-        } else {
-          printf("Skipping GPU %d: insufficient memory (less than 5GB)\n", i);
-        }
-      }
-    }
-
-    if (gpu_thread_count == 0) {
-      fprintf(stderr, "No GPUs with at least 5GB of memory found\n");
-    } else {
-      printf("Running torture test on %d GPU(s)\n", gpu_thread_count);
-    }
+#ifdef __CUDACC__
+    torture_gpu();
+#else
+    fprintf(stderr, "GPU torture not available (compiled without CUDA support)\n");
+#endif
   }
 
   char *allocated_mem = alloc_mem(mem_bytes);
