@@ -1,5 +1,5 @@
 #if 0
-TMP="$(mktemp -d)"; cc -o "$TMP/a.out" -x c "$0" && "$TMP/a.out" "$@"; RVAL=$?; rm -rf "$TMP"; exit $RVAL
+TMP="$(mktemp -d)"; cc -O3 -o "$TMP/a.out" -x c "$0" && "$TMP/a.out" "$@"; RVAL=$?; rm -rf "$TMP"; exit $RVAL
 #endif
 
 #include <stdio.h>
