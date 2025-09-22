@@ -1,0 +1,2 @@
+#!/bin/sh
+ip a | grep -v inet6 | grep -v 127.0.0.1 | grep inet
