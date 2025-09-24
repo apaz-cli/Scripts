@@ -77,11 +77,11 @@ echo -e '[greeter]\nbackground = /home/apaz/Pictures/Icons-Resources/Greeter_Wal
 ##################
 
 # YTDL
-cd ~
-sudo curl -L https://yt-dl.org/downloads/latest/youtube-dl -o /bin/ytdl
-sudo chmod a+rx /bin/ytdl
-ytdl --update
-echo "Installed Youtube-dl."
+#cd ~
+#sudo curl -L https://yt-dl.org/downloads/latest/youtube-dl -o /bin/ytdl
+#sudo chmod a+rx /bin/ytdl
+#ytdl --update
+#echo "Installed Youtube-dl."
 
 
 ##########

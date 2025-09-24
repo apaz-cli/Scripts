@@ -1,2 +1,11 @@
 #!/bin/sh
-ip a | grep -v inet6 | grep -v 127.0.0.1 | grep inet
+RES="$(ip a | grep -v inet6 | grep -v 127.0.0.1 | grep inet)"
+
+line_count=$(echo "$RES" | wc -l)
+if [ "$line_count" -eq 1 ]; then
+    # Extract just the IP address (before the /)
+    echo "$RES" | grep -o 'inet [0-9.]*' | cut -d' ' -f2
+else
+    # Print the original content
+    echo "$RES"
+fi
