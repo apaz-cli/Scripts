@@ -1,0 +1,12 @@
+#!/bin/sh
+
+if [ ! -f "/usr/local/bin/croc" ]; then
+    echo "croc not found. Installing..."
+    curl https://getcroc.schollz.com | bash
+    if [ ! -f "/usr/local/bin/croc" ]; then
+        echo "Failed to install croc"
+        exit 1
+    fi
+fi
+
+"/usr/local/bin/croc" "$@"

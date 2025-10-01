@@ -1,0 +1,16 @@
+#!/bin/sh
+
+if [ ! -d "/tmp/nvtop" ]; then
+    sudo apt install git cmake libncurses5-dev libncursesw5-dev libudev-dev libdrm-dev libsystemd-dev
+    cd /tmp/
+    git clone https://github.com/Syllo/nvtop.git --depth=1
+    cd nvtop/
+    mkdir build/
+    cd build/
+    cmake .. -DNVIDIA_SUPPORT=ON -DAMDGPU_SUPPORT=ON -DINTEL_SUPPORT=ON
+    make -j
+fi
+
+/tmp/nvtop/build/src/nvtop "$@"
+
+
