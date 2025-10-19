@@ -10,6 +10,12 @@ fi
 
 # Check if the user is in the `docker` group. If not, add the user and prompt restart.
 if [ $(id -Gn | grep -c docker) -eq 0 ]; then
+    # Check if docker group exists, create it if it doesn't
+    if ! getent group docker > /dev/null 2>&1; then
+        echo "Docker group does not exist. Creating docker group..."
+        sudo groupadd docker
+    fi
+
     echo "Adding user to docker group..."
     sudo usermod -aG docker "$USER"
     echo "Please restart your computer to apply changes."
