@@ -235,7 +235,7 @@ static void torture_gpu() {
   }
 
   pthread_t gpu_threads[16]; // Support up to 16 GPUs
-  GPUThreadArg gpu_thread_args[16];
+  static GPUThreadArg gpu_thread_args[16];
   int gpu_thread_count = 0;
 
   // Check each GPU and create threads for those with enough memory
