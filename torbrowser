@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+"""
+Tor Browser Launcher - Automatically downloads and runs Tor Browser
+"""
+import os
+import re
+import subprocess
+from pathlib import Path
+from urllib.request import urlopen, urlretrieve
+
+
+tmp_dir = Path('/tmp')
+browser_dir = tmp_dir / 'tor-browser'
+
+# If already extracted, just run it
+if browser_dir.exists():
+    print(f"Tor Browser already exists at {browser_dir}")
+    os.chdir(browser_dir)
+    subprocess.run(['./Browser/start-tor-browser'])
+    exit()
+
+# Fetch download URL
+print("Fetching download link...")
+with urlopen("https://www.torproject.org/download/") as response:
+    html = response.read().decode('utf-8')
+
+match = re.search(r'href="(/dist/torbrowser/[^"]*tor-browser-linux-x86_64-[^"]*\.tar\.xz)"', html)
+if not match:
+    raise Exception("Could not find download link")
+
+download_url = f"https://www.torproject.org{match.group(1)}"
+filename = download_url.split('/')[-1]
+download_path = tmp_dir / filename
+
+# Download if needed
+if not download_path.exists():
+    print(f"Downloading {download_url}...")
+    urlretrieve(download_url, download_path)
+    print("Download complete!")
+else:
+    print(f"Already downloaded: {download_path}")
+
+# Extract
+print("Extracting...")
+subprocess.run(['tar', '-xf', download_path, '-C', tmp_dir], check=True)
+
+# Run
+print("Starting Tor Browser...")
+os.chdir(browser_dir)
+subprocess.run(['./Browser/start-tor-browser'])
