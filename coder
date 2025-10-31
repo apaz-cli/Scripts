@@ -1,0 +1,42 @@
+#!/bin/sh
+
+MODEL_NAME="Qwen3-Coder-30B-A3B-Instruct-Q5_K_S.gguf"
+MODEL_REPO="unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF"
+
+MODELS_PATH="$HOME/.ggml"
+MODEL_PATH="$MODELS_PATH/$MODEL_NAME"
+MODEL_URL="https://huggingface.co/$MODEL_REPO/resolve/main/$MODEL_NAME?download=true"
+
+# Clone llama.cpp only if it doesn't exist
+REPO_PATH="/tmp/llama.cpp"
+REPO_URL="https://github.com/ggml-org/llama.cpp"
+if [ ! -d "$REPO_PATH" ]; then
+  git clone "$REPO_URL" "$REPO_PATH"
+fi
+
+# Download model only if it doesn't exist
+if [ ! -f "$MODEL_PATH" ]; then
+  mkdir -p "$(dirname "$MODEL_PATH")"
+  curl -sSL "$MODEL_URL" \
+    > "$MODEL_PATH" &
+fi
+
+WD="$(pwd)"
+
+cd "$REPO_PATH"
+
+cmake -B build -DGGML_CUDA=ON
+cmake --build build --config Release -j "$(nproc)"
+
+cd "$WD"
+echo "Waiting for download to complete."
+wait
+
+"$REPO_PATH/build/bin/llama-server" \
+  -m "$MODEL_PATH" \
+  --host 0.0.0.0 \
+  --port 8080 \
+  -ngl 99 \
+  -c 32768 \
+  -fa 1
+

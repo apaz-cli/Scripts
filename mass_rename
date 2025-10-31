@@ -1,0 +1,506 @@
+#!/usr/bin/env python3
+"""
+Mass Rename Tool
+
+A feature-complete file renaming utility with collision detection,
+preview mode, and multiple renaming strategies.
+"""
+
+import os
+import sys
+import argparse
+import re
+from pathlib import Path
+from collections import defaultdict, Counter
+import shutil
+
+
+class RenameOperation:
+    """Represents a single rename operation with collision handling."""
+
+    def __init__(self, source_path, target_path, operation_type="rename"):
+        self.source_path = Path(source_path)
+        self.target_path = Path(target_path)
+        self.operation_type = operation_type
+        self.resolved_path = None
+
+    def __str__(self):
+        return f"{self.source_path} -> {self.target_path}"
+
+
+class MassRenamer:
+    def __init__(self, dry_run=False, verbose=False):
+        self.dry_run = dry_run
+        self.verbose = verbose
+        self.operations = []
+        self.collisions = []
+
+    def find_files(self, directory, pattern=None, recursive=False, case_sensitive=False):
+        """Find files matching pattern in directory."""
+        directory = Path(directory)
+        files = []
+
+        if recursive:
+            glob_pattern = "**/*" if pattern is None else f"**/{pattern}"
+        else:
+            glob_pattern = "*" if pattern is None else pattern
+
+        try:
+            for file_path in directory.glob(glob_pattern):
+                if file_path.is_file():
+                    if pattern is None:
+                        files.append(file_path)
+                    else:
+                        # Manual pattern matching for case sensitivity control
+                        filename = file_path.name
+                        search_pattern = pattern if case_sensitive else pattern.lower()
+                        search_filename = filename if case_sensitive else filename.lower()
+
+                        # Convert glob pattern to regex
+                        regex_pattern = re.escape(search_pattern)
+                        regex_pattern = regex_pattern.replace(r'\*', '.*').replace(r'\?', '.')
+                        if re.fullmatch(regex_pattern, search_filename):
+                            files.append(file_path)
+        except Exception as e:
+            print(f"Error scanning directory: {e}", file=sys.stderr)
+
+        return files
+
+    def check_collisions(self, operations):
+        """Check for naming collisions in rename operations."""
+        target_counts = Counter()
+        source_to_target = {}
+        collision_issues = []
+
+        # Count target occurrences
+        for op in operations:
+            target_counts[op.target_path] += 1
+            source_to_target[op.source_path] = op.target_path
+
+        # Find collisions
+        for target_path, count in target_counts.items():
+            if count > 1:
+                sources = [op.source_path for op in operations if op.target_path == target_path]
+                collision_issues.append({
+                    'target': target_path,
+                    'sources': sources,
+                    'type': 'multiple_to_one'
+                })
+
+        # Check for overwrite collisions (target exists and is not being renamed)
+        all_targets = set(target_counts.keys())
+        all_sources = set(source_to_target.keys())
+
+        for target_path in all_targets:
+            if target_path.exists() and target_path not in all_sources:
+                collision_issues.append({
+                    'target': target_path,
+                    'sources': [op.source_path for op in operations if op.target_path == target_path],
+                    'type': 'overwrite_existing'
+                })
+
+        return collision_issues
+
+    def resolve_collisions(self, operations, strategy="number"):
+        """Resolve naming collisions using specified strategy."""
+        collisions = self.check_collisions(operations)
+
+        if not collisions:
+            return operations, []
+
+        resolved_operations = operations.copy()
+        resolution_report = []
+
+        for collision in collisions:
+            if collision['type'] == 'multiple_to_one':
+                target_path = collision['target']
+                sources = collision['sources']
+
+                if strategy == "skip":
+                    # Remove all operations for this collision
+                    resolved_operations = [op for op in resolved_operations
+                                         if op.target_path != target_path]
+                    resolution_report.append(f"Skipped {len(sources)} files that would collide to {target_path}")
+
+                elif strategy == "number":
+                    # Number the colliding files
+                    for i, source_path in enumerate(sources, 1):
+                        for op in resolved_operations:
+                            if op.source_path == source_path and op.target_path == target_path:
+                                stem = target_path.stem
+                                suffix = target_path.suffix
+                                new_target = target_path.parent / f"{stem}_{i}{suffix}"
+                                op.target_path = new_target
+                                resolution_report.append(f"Renamed {source_path} to {new_target} to avoid collision")
+                                break
+
+                elif strategy == "interactive":
+                    # In interactive mode, let user decide for each collision
+                    print(f"\nCollision detected: Multiple files would be renamed to {target_path}")
+                    for i, source_path in enumerate(sources, 1):
+                        print(f"{i}. {source_path}")
+
+                    while True:
+                        try:
+                            choice = input("Choose which file to keep this name (or 's' to skip all): ")
+                            if choice.lower() == 's':
+                                # Skip all operations for this collision
+                                resolved_operations = [op for op in resolved_operations
+                                                     if op.target_path != target_path]
+                                resolution_report.append(f"Skipped {len(sources)} files due to collision")
+                                break
+                            else:
+                                choice_idx = int(choice) - 1
+                                if 0 <= choice_idx < len(sources):
+                                    # Keep chosen file, number others
+                                    for i, source_path in enumerate(sources):
+                                        for op in resolved_operations:
+                                            if op.source_path == source_path and op.target_path == target_path:
+                                                if i == choice_idx:
+                                                    # Keep the original name for chosen file
+                                                    resolution_report.append(f"Keeping {source_path} as {target_path}")
+                                                else:
+                                                    stem = target_path.stem
+                                                    suffix = target_path.suffix
+                                                    new_target = target_path.parent / f"{stem}_{i+1}{suffix}"
+                                                    op.target_path = new_target
+                                                    resolution_report.append(f"Renamed {source_path} to {new_target}")
+                                                break
+                                    break
+                        except (ValueError, IndexError):
+                            print("Invalid choice. Please enter a valid number or 's' to skip.")
+
+            elif collision['type'] == 'overwrite_existing':
+                target_path = collision['target']
+                sources = collision['sources']
+
+                if strategy == "skip":
+                    resolved_operations = [op for op in resolved_operations
+                                         if op.target_path != target_path]
+                    resolution_report.append(f"Skipped overwrite of existing file {target_path}")
+
+                elif strategy in ["number", "interactive"]:
+                    # For existing files, always number the new files
+                    for i, source_path in enumerate(sources, 1):
+                        for op in resolved_operations:
+                            if op.source_path == source_path and op.target_path == target_path:
+                                stem = target_path.stem
+                                suffix = target_path.suffix
+                                new_target = target_path.parent / f"{stem}_{i}{suffix}"
+                                op.target_path = new_target
+                                resolution_report.append(f"Renamed {source_path} to {new_target} to avoid overwriting existing file")
+                                break
+
+        return resolved_operations, resolution_report
+
+    def regex_rename(self, directory, pattern, replacement,
+                    recursive=False, case_sensitive=True, file_pattern=None):
+        """Rename files using regex pattern replacement."""
+        directory = Path(directory)
+        files = self.find_files(directory, file_pattern, recursive, case_sensitive)
+        operations = []
+
+        flags = 0 if case_sensitive else re.IGNORECASE
+
+        for file_path in files:
+            try:
+                new_name = re.sub(pattern, replacement, file_path.name, flags=flags)
+                if new_name != file_path.name:
+                    target_path = file_path.parent / new_name
+                    operations.append(RenameOperation(file_path, target_path))
+            except re.error as e:
+                print(f"Invalid regex pattern: {e}", file=sys.stderr)
+                return []
+
+        return operations
+
+    def prefix_rename(self, directory, prefix, recursive=False, file_pattern=None):
+        """Add prefix to filenames."""
+        directory = Path(directory)
+        files = self.find_files(directory, file_pattern, recursive)
+        operations = []
+
+        for file_path in files:
+            new_name = prefix + file_path.name
+            target_path = file_path.parent / new_name
+            operations.append(RenameOperation(file_path, target_path))
+
+        return operations
+
+    def suffix_rename(self, directory, suffix, recursive=False, file_pattern=None):
+        """Add suffix to filenames (before extension)."""
+        directory = Path(directory)
+        files = self.find_files(directory, file_pattern, recursive)
+        operations = []
+
+        for file_path in files:
+            stem = file_path.stem
+            extension = file_path.suffix
+            new_name = stem + suffix + extension
+            target_path = file_path.parent / new_name
+            operations.append(RenameOperation(file_path, target_path))
+
+        return operations
+
+    def case_rename(self, directory, case_type, recursive=False, file_pattern=None):
+        """Change filename case."""
+        directory = Path(directory)
+        files = self.find_files(directory, file_pattern, recursive)
+        operations = []
+
+        for file_path in files:
+            if case_type == "lower":
+                new_name = file_path.name.lower()
+            elif case_type == "upper":
+                new_name = file_path.name.upper()
+            elif case_type == "title":
+                new_name = file_path.name.title()
+            else:
+                continue
+
+            if new_name != file_path.name:
+                target_path = file_path.parent / new_name
+                operations.append(RenameOperation(file_path, target_path))
+
+        return operations
+
+    def sequential_rename(self, directory, pattern, start=1, recursive=False, file_pattern=None):
+        """Rename files sequentially with numbering."""
+        directory = Path(directory)
+        files = self.find_files(directory, file_pattern, recursive)
+        operations = []
+
+        # Sort files for consistent ordering
+        files.sort()
+
+        for i, file_path in enumerate(files, start):
+            new_name = pattern.format(number=i, original=file_path.stem, ext=file_path.suffix[1:])
+            target_path = file_path.parent / new_name
+            operations.append(RenameOperation(file_path, target_path))
+
+        return operations
+
+    def preview_operations(self, operations):
+        """Preview what would be renamed."""
+        if not operations:
+            print("No files would be renamed.")
+            return
+
+        print("\nPreview of rename operations:")
+        print("-" * 80)
+        for op in operations:
+            print(f"{op.source_path.name} -> {op.target_path.name}")
+        print("-" * 80)
+        print(f"Total files to rename: {len(operations)}")
+
+    def execute_operations(self, operations):
+        """Execute the rename operations."""
+        if not operations:
+            print("No operations to perform.")
+            return True
+
+        successful = 0
+        failed = []
+
+        for op in operations:
+            try:
+                if self.verbose:
+                    print(f"Renaming: {op.source_path} -> {op.target_path}")
+
+                if not self.dry_run:
+                    # Create parent directories if they don't exist
+                    op.target_path.parent.mkdir(parents=True, exist_ok=True)
+
+                    # Perform the rename/move
+                    shutil.move(str(op.source_path), str(op.target_path))
+
+                successful += 1
+
+            except Exception as e:
+                failed.append((op.source_path, str(e)))
+                if self.verbose:
+                    print(f"Failed to rename {op.source_path}: {e}")
+
+        # Report results
+        print(f"\nRename operation completed:")
+        print(f"Successful: {successful}")
+        print(f"Failed: {len(failed)}")
+
+        if failed and self.verbose:
+            print("\nFailed operations:")
+            for path, error in failed:
+                print(f"  {path}: {error}")
+
+        return len(failed) == 0
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Mass file renaming tool with collision detection",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Preview regex rename
+  python mass_rename.py /path/to/files -r "(.+)\\.jpg" "\\1.png" --dry-run
+
+  # Add prefix to all text files
+  python mass_rename.py /path/to/files --prefix "backup_" --pattern "*.txt"
+
+  # Sequential numbering
+  python mass_rename.py /path/to/files --sequential "image_{number:03d}.{ext}"
+
+  # Convert to lowercase with collision resolution
+  python mass_rename.py /path/to/files --case lower --collision number
+
+  # Recursive regex replace
+  python mass_rename.py /path/to/files -r " " "_" --recursive --collision interactive
+        """
+    )
+
+    # Basic options
+    parser.add_argument("directory", help="Directory containing files to rename")
+    parser.add_argument("--dry-run", action="store_true",
+                       help="Preview changes without actually renaming")
+    parser.add_argument("--verbose", action="store_true",
+                       help="Show detailed output")
+    parser.add_argument("--recursive", "-R", action="store_true",
+                       help="Process directories recursively")
+    parser.add_argument("--pattern", "-p",
+                       help="File pattern to match (e.g., '*.txt')")
+
+    # Renaming methods
+    rename_methods = parser.add_mutually_exclusive_group(required=True)
+    rename_methods.add_argument("--regex", "-r", nargs=2, metavar=("PATTERN", "REPLACEMENT"),
+                               help="Regex search and replace")
+    rename_methods.add_argument("--prefix",
+                               help="Add prefix to filenames")
+    rename_methods.add_argument("--suffix",
+                               help="Add suffix to filenames (before extension)")
+    rename_methods.add_argument("--case", choices=["lower", "upper", "title"],
+                               help="Change filename case")
+    rename_methods.add_argument("--sequential",
+                               help="Sequential rename pattern (use {number}, {original}, {ext})")
+
+    # Collision handling
+    parser.add_argument("--collision", choices=["skip", "number", "interactive"],
+                       default="number",
+                       help="Collision resolution strategy (default: number)")
+    parser.add_argument("--no-collision-check", action="store_true",
+                       help="Skip collision detection (not recommended)")
+
+    # Sequential numbering
+    parser.add_argument("--start", type=int, default=1,
+                       help="Starting number for sequential rename (default: 1)")
+
+    # Regex options
+    parser.add_argument("--case-sensitive", action="store_true",
+                       help="Case sensitive regex matching")
+
+    args = parser.parse_args()
+
+    # Check if directory exists
+    if not Path(args.directory).exists():
+        print(f"Error: Directory '{args.directory}' does not exist.", file=sys.stderr)
+        sys.exit(1)
+
+    # Initialize renamer
+    renamer = MassRenamer(dry_run=args.dry_run, verbose=args.verbose)
+
+    # Generate rename operations based on method
+    operations = []
+
+    try:
+        if args.regex:
+            pattern, replacement = args.regex
+            operations = renamer.regex_rename(
+                args.directory, pattern, replacement,
+                recursive=args.recursive,
+                case_sensitive=args.case_sensitive,
+                file_pattern=args.pattern
+            )
+        elif args.prefix:
+            operations = renamer.prefix_rename(
+                args.directory, args.prefix,
+                recursive=args.recursive,
+                file_pattern=args.pattern
+            )
+        elif args.suffix:
+            operations = renamer.suffix_rename(
+                args.directory, args.suffix,
+                recursive=args.recursive,
+                file_pattern=args.pattern
+            )
+        elif args.case:
+            operations = renamer.case_rename(
+                args.directory, args.case,
+                recursive=args.recursive,
+                file_pattern=args.pattern
+            )
+        elif args.sequential:
+            operations = renamer.sequential_rename(
+                args.directory, args.sequential,
+                start=args.start,
+                recursive=args.recursive,
+                file_pattern=args.pattern
+            )
+    except Exception as e:
+        print(f"Error generating rename operations: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if not operations:
+        print("No files would be renamed with the current parameters.")
+        sys.exit(0)
+
+    # Handle collisions
+    resolution_report = []
+    if not args.no_collision_check:
+        collisions = renamer.check_collisions(operations)
+
+        if collisions:
+            print(f"Found {len(collisions)} potential collision(s)")
+
+            if args.collision == "interactive" and not args.dry_run:
+                # Show collisions and get confirmation
+                for i, collision in enumerate(collisions, 1):
+                    print(f"\nCollision {i}:")
+                    if collision['type'] == 'multiple_to_one':
+                        print(f"  Multiple files would be renamed to: {collision['target']}")
+                        for source in collision['sources']:
+                            print(f"    - {source}")
+                    else:  # overwrite_existing
+                        print(f"  Would overwrite existing file: {collision['target']}")
+
+                response = input("\nProceed with collision resolution? (y/n): ")
+                if response.lower() != 'y':
+                    print("Operation cancelled.")
+                    sys.exit(0)
+
+            operations, resolution_report = renamer.resolve_collisions(
+                operations, args.collision
+            )
+
+    # Preview operations
+    renamer.preview_operations(operations)
+
+    if resolution_report:
+        print("\nCollision resolutions:")
+        for report in resolution_report:
+            print(f"  {report}")
+
+    # Confirm execution (unless dry-run)
+    if not args.dry_run and operations:
+        if args.collision != "interactive":  # Already confirmed in interactive mode
+            response = input("\nProceed with rename? (y/n): ")
+            if response.lower() != 'y':
+                print("Operation cancelled.")
+                sys.exit(0)
+
+    # Execute operations
+    success = renamer.execute_operations(operations)
+
+    if not success:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

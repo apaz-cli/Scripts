@@ -11,14 +11,42 @@ TMP="$(mktemp -d)"; cc -O3 -o "$TMP/a.out" -x c "$0" && "$TMP/a.out" "$@"; RVAL=
 #define BUFFER_SIZE 8192
 
 int main(int argc, char *argv[]) {
-    if (argc != 4) {
-        fprintf(stderr, "Usage: %s <input_file> <output_file1> <output_file2>\n", argv[0]);
+    int exists_ok = 0;
+    int arg_offset = 0;
+
+    // Check for --exists-ok flag
+    if (argc >= 2 && strcmp(argv[1], "--exists-ok") == 0) {
+        exists_ok = 1;
+        arg_offset = 1;
+    }
+
+    if (argc != 4 + arg_offset) {
+        fprintf(stderr, "Usage: %s [--exists-ok] <input_file> <output_file1> <output_file2>\n", argv[0]);
         return 1;
     }
 
-    const char *input_file = argv[1];
-    const char *output_file1 = argv[2];
-    const char *output_file2 = argv[3];
+    const char *input_file = argv[1 + arg_offset];
+    const char *output_file1 = argv[2 + arg_offset];
+    const char *output_file2 = argv[3 + arg_offset];
+
+    // Check if output files exist (unless --exists-ok is set)
+    if (!exists_ok) {
+        FILE *check1 = fopen(output_file1, "r");
+        if (check1) {
+            fclose(check1);
+            fprintf(stderr, "Error: output file '%s' already exists\n", output_file1);
+            fprintf(stderr, "Use --exists-ok to overwrite existing files\n");
+            return 1;
+        }
+
+        FILE *check2 = fopen(output_file2, "r");
+        if (check2) {
+            fclose(check2);
+            fprintf(stderr, "Error: output file '%s' already exists\n", output_file2);
+            fprintf(stderr, "Use --exists-ok to overwrite existing files\n");
+            return 1;
+        }
+    }
 
     // Open input file for reading
     FILE *input = fopen(input_file, "r");
