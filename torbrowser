@@ -14,7 +14,6 @@ browser_dir = tmp_dir / 'tor-browser'
 
 # If already extracted, just run it
 if browser_dir.exists():
-    print(f"Tor Browser already exists at {browser_dir}")
     os.chdir(browser_dir)
     subprocess.run(['./Browser/start-tor-browser'])
     exit()
