@@ -1,42 +1,88 @@
 #!/bin/sh
 
+
 MODEL_NAME="Qwen3-Coder-30B-A3B-Instruct-Q5_K_S.gguf"
 MODEL_REPO="unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF"
+CHAT_TEMPL="https://huggingface.co/unsloth/Qwen3-Coder-30B-A3B-Instruct/raw/main/chat_template.jinja"
 
 MODELS_PATH="$HOME/.ggml"
 MODEL_PATH="$MODELS_PATH/$MODEL_NAME"
+TEMPL_PATH="$MODELS_PATH/$MODEL_NAME""_chat_template.jinja"
 MODEL_URL="https://huggingface.co/$MODEL_REPO/resolve/main/$MODEL_NAME?download=true"
 
-# Clone llama.cpp only if it doesn't exist
+LLAMA_CPP_PORT="9876"
+PROXIED_PORT="9877"
+
 REPO_PATH="/tmp/llama.cpp"
+LITELLM_PATH="/tmp/cc_litellm_venv"
 REPO_URL="https://github.com/ggml-org/llama.cpp"
-if [ ! -d "$REPO_PATH" ]; then
-  git clone "$REPO_URL" "$REPO_PATH"
-fi
+
+ANY_BUILD=0
 
 # Download model only if it doesn't exist
 if [ ! -f "$MODEL_PATH" ]; then
+  ANY_BUILD=1
+  echo "Downloading $MODEL_REPO."
   mkdir -p "$(dirname "$MODEL_PATH")"
-  curl -sSL "$MODEL_URL" \
-    > "$MODEL_PATH" &
+  curl -sSL "$MODEL_URL" > "$MODEL_PATH" &
+  curl -sSL "$CHAT_TEMPL" > "$TEMPL_PATH" &
 fi
 
-WD="$(pwd)"
+# Create a venv with litellm proxy
+if [ ! -f "$LITELLM_PATH" ]; then
+  ANY_BUILD=1
+  echo "Setting up litellm proxy."
+  mkdir -p "$(dirname "$LITELLM_PATH")"
+  python -m venv "$LITELLM_PATH"
+  "$LITELLM_PATH/bin/pip" install 'litellm[proxy]' >/dev/null 2>&1 &
+fi
 
-cd "$REPO_PATH"
+# Clone llama.cpp only if it doesn't exist
+if [ ! -d "$REPO_PATH" ]; then
+  ANY_BUILD=1
+  echo "Compiling llama.cpp."
+  git clone "$REPO_URL" "$REPO_PATH" >/dev/null 2>&1
 
-cmake -B build -DGGML_CUDA=ON
-cmake --build build --config Release -j "$(nproc)"
+  WD="$(pwd)"
+  cd "$REPO_PATH"
 
-cd "$WD"
-echo "Waiting for download to complete."
-wait
+  echo "Building llama.cpp."
+  cmake -B build -DGGML_CUDA=ON >/dev/null 2>&1
+  cmake --build build --config Release -j "$(nproc)" >/dev/null 2>&1 &
 
+  cd "$WD"
+fi
+
+if [ "$ANY_BUILD" = 1]; then
+  echo "Waiting for llama.cpp build and model download to complete."
+  wait
+fi
+
+# Start Model
 "$REPO_PATH/build/bin/llama-server" \
   -m "$MODEL_PATH" \
   --host 0.0.0.0 \
-  --port 8080 \
+  --port "$LLAMA_CPP_PORT" \
   -ngl 99 \
   -c 32768 \
-  -fa 1
+  -fa 1 \
+  >/tmp/llama_server_logs 2>&1 \
+  &
 
+# Start Litellm Proxy
+"$LITELLM_PATH/bin/litellm" \
+  --num_workers 2 \
+  --telemetry False \
+  --drop_params \
+  --model "$MODEL_REPO" \
+  >/tmp/litellm_logs 2>&1 \
+  &
+
+# Start claude code
+LLAMA_API_KEY=sk-1234-miaw
+OPENAI_API_KEY="$LLAMA_API_KEY"
+ANTHROPIC_AUTH_TOKEN="$OPENAI_API_KEY"
+ANTHROPIC_BASE_URL="http://127.0.0.1:$PROXIED_PORT"
+ANTHROPIC_MODEL="openai/$HF_MODEL"
+claude \
+  --model "$MODEL_NAME"
