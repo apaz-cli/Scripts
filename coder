@@ -5,6 +5,8 @@ MODEL_NAME="Qwen3-Coder-30B-A3B-Instruct-Q5_K_S.gguf"
 MODEL_REPO="unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF"
 CHAT_TEMPL="https://huggingface.co/unsloth/Qwen3-Coder-30B-A3B-Instruct/raw/main/chat_template.jinja"
 
+PROXIED_MODEL_NAME="openai/qwen3-coder"
+
 MODELS_PATH="$HOME/.ggml"
 MODEL_PATH="$MODELS_PATH/$MODEL_NAME"
 TEMPL_PATH="$MODELS_PATH/$MODEL_NAME""_chat_template.jinja"
@@ -53,36 +55,56 @@ if [ ! -d "$REPO_PATH" ]; then
   cd "$WD"
 fi
 
-if [ "$ANY_BUILD" = 1]; then
+if [ "$ANY_BUILD" = 1 ]; then
   echo "Waiting for llama.cpp build and model download to complete."
   wait
 fi
 
 # Start Model
+CUDA_VISIBLE_DEVICES=0 \
 "$REPO_PATH/build/bin/llama-server" \
   -m "$MODEL_PATH" \
   --host 0.0.0.0 \
   --port "$LLAMA_CPP_PORT" \
-  -ngl 99 \
+  --chat-template-file "$TEMPL_PATH" \
+  --jinja \
   -c 32768 \
   -fa 1 \
+  --temp 0.7 \
+  --min-p 0 \
+  --top-p 0.80 \
+  --top-k 20 \
+  --repeat-penalty 1.05 \
   >/tmp/llama_server_logs 2>&1 \
   &
 
+# Create Litellm config
+cat > /tmp/litellm_config.yaml <<EOF
+model_list:
+  - model_name: $MODEL_NAME
+    litellm_params:
+      model: $PROXIED_MODEL_NAME
+      api_base: http://127.0.0.1:$LLAMA_CPP_PORT/v1
+      api_key: sk-1234-meow
+
+general_settings:
+  master_key: sk-1234-meow
+EOF
+
 # Start Litellm Proxy
 "$LITELLM_PATH/bin/litellm" \
+  --config /tmp/litellm_config.yaml \
+  --port "$PROXIED_PORT" \
   --num_workers 2 \
   --telemetry False \
   --drop_params \
-  --model "$MODEL_REPO" \
   >/tmp/litellm_logs 2>&1 \
   &
 
+# Wait for services to start
+sleep 2
+
 # Start claude code
-LLAMA_API_KEY=sk-1234-miaw
-OPENAI_API_KEY="$LLAMA_API_KEY"
-ANTHROPIC_AUTH_TOKEN="$OPENAI_API_KEY"
-ANTHROPIC_BASE_URL="http://127.0.0.1:$PROXIED_PORT"
-ANTHROPIC_MODEL="openai/$HF_MODEL"
-claude \
-  --model "$MODEL_NAME"
+export ANTHROPIC_AUTH_TOKEN="sk-1234-meow"
+export ANTHROPIC_BASE_URL="http://127.0.0.1:$PROXIED_PORT"
+claude --model "$PROXIED_MODEL_NAME"
