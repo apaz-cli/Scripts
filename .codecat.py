@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+
+import argparse
+import sys
+import os
+import subprocess
+from pygments import highlight
+from pygments.lexers import get_lexer_for_filename, guess_lexer, get_lexer_by_name
+from pygments.formatters import TerminalFormatter
+from pygments.style import Style
+from pygments.styles.vim import VimStyle
+from pygments.util import ClassNotFound
+
+copy_style = VimStyle
+
+class CustomStyle(Style):
+    background_color = copy_style.background_color
+    highlight_color = copy_style.highlight_color
+    styles = copy_style.styles
+
+
+def choose_lexer(file_path, content):
+    try:
+        return get_lexer_for_filename(file_path)
+    except ClassNotFound:
+        pass
+
+    # Check for shebangs
+    lines = content.split("\n")
+    if len(lines) > 1 and lines[0].startswith("#!"):
+        if "python" in lines[0]:
+            return get_lexer_by_name("python")
+        elif "bash" in lines[0] or "sh" in lines[0]:
+            return get_lexer_by_name("bash")
+
+    # Check for C "shebang"
+    if len(lines) > 1 and lines[0].strip() == "#if 0":
+        return get_lexer_by_name("c")
+
+    # Fallback to guessing
+    return guess_lexer(content)
+
+
+def fallback_to_cat(file_path):
+    try:
+        subprocess.run(["cat", file_path], check=True)
+    except subprocess.CalledProcessError:
+        print(f"Error: Failed to cat file '{file_path}'.", file=sys.stderr)
+
+
+def cat_highlighted(file_path):
+    try:
+        with open(file_path, "r") as file:
+            content = file.read()
+
+        lexer = choose_lexer(file_path, content)
+        term = os.environ.get('TERM', '')
+        style = CustomStyle
+        formatter = TerminalFormatter()
+        highlighted = highlight(content, lexer, formatter)
+        print(highlighted)
+
+    except BaseException:
+        fallback_to_cat(file_path)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Cat files with syntax highlighting.")
+    parser.add_argument("files", nargs="+", help="File(s) to display")
+    args = parser.parse_args()
+
+    for file_path in args.files:
+        cat_highlighted(file_path)
+
+
+if __name__ == "__main__":
+    main()
