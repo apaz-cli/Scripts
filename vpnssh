@@ -33,9 +33,9 @@ total=${#machines[@]}
 # Function to draw the menu
 draw_menu() {
     clear
-    echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════╗${NC}"
-    echo -e "${BOLD}${CYAN}║${NC}            ${BOLD}${WHITE}SSH Machine Selector${NC}            ${BOLD}${CYAN}║${NC}"
-    echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════╝${NC}"
+    echo -e "${BOLD}${YELLOW}╔══════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}${YELLOW}║${NC}            ${BOLD}${WHITE}SSH Machine Selector${NC}            ${BOLD}${YELLOW}║${NC}"
+    echo -e "${BOLD}${YELLOW}╚══════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${YELLOW}Use ↑/↓ arrow keys to navigate, Enter to select, q to quit${NC}"
     echo ""
@@ -46,14 +46,14 @@ draw_menu() {
         target="${machine#* }"
         
         if [ $i -eq $selected ]; then
-            echo -e "  ${BOLD}${GREEN}► ${name}${NC} ${BOLD}${WHITE}(${target})${NC}"
+            echo -e "  ${BOLD}${GREEN}► ${name}${NC} ${BLUE}(${target})${NC}"
         else
             echo -e "    ${name} ${BLUE}(${target})${NC}"
         fi
     done
     
     echo ""
-    echo -e "${CYAN}────────────────────────────────────────────────${NC}"
+    echo -e "${YELLOW}────────────────────────────────────────────────${NC}"
 }
 
 # Function to handle key input
