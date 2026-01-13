@@ -37,7 +37,7 @@ draw_menu() {
     echo -e "${BOLD}${YELLOW}║${NC}            ${BOLD}${WHITE}SSH Machine Selector${NC}              ${BOLD}${YELLOW}║${NC}"
     echo -e "${BOLD}${YELLOW}╚══════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "${YELLOW}Use ↑/↓ arrow keys to navigate, Enter to select, q to quit${NC}"
+    echo -e "${YELLOW}Use ↑/↓/←/→ arrow keys to navigate, 1-${total} for hotkeys, Enter to select, q to quit${NC}"
     echo ""
     
     for i in "${!machines[@]}"; do
@@ -46,9 +46,9 @@ draw_menu() {
         target="${machine#* }"
         
         if [ $i -eq $selected ]; then
-            echo -e "  ${BOLD}${GREEN}► ${name}${NC} ${BLUE}(${target})${NC}"
+            echo -e "  ${BOLD}${GREEN}► $((i+1)). ${name}${NC} ${BLUE}(${target})${NC}"
         else
-            echo -e "    ${name} ${BLUE}(${target})${NC}"
+            echo -e "    $((i+1)). ${name} ${BLUE}(${target})${NC}"
         fi
     done
     echo -e "${YELLOW}────────────────────────────────────────────────${NC}"
@@ -63,14 +63,14 @@ handle_input() {
             $'\x1b')  # ESC sequence
                 read -rsn2 key
                 case "$key" in
-                    '[A')  # Up arrow
+                    '[A'|'[D')  # Up arrow or Left arrow
                         ((selected--))
                         if [ $selected -lt 0 ]; then
                             selected=$((total - 1))
                         fi
                         draw_menu
                         ;;
-                    '[B')  # Down arrow
+                    '[B'|'[C')  # Down arrow or Right arrow
                         ((selected++))
                         if [ $selected -ge $total ]; then
                             selected=0
@@ -85,6 +85,13 @@ handle_input() {
             'q'|'Q')  # Quit
                 echo -e "\n${YELLOW}Exiting...${NC}"
                 exit 0
+                ;;
+            [1-9])  # Number hotkeys
+                num=$((key - 1))
+                if [ $num -ge 0 ] && [ $num -lt $total ]; then
+                    selected=$num
+                    return 0
+                fi
                 ;;
         esac
     done
