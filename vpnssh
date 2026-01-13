@@ -34,7 +34,7 @@ total=${#machines[@]}
 draw_menu() {
     clear
     echo -e "${BOLD}${YELLOW}╔══════════════════════════════════════════════╗${NC}"
-    echo -e "${BOLD}${YELLOW}║${NC}            ${BOLD}${WHITE}SSH Machine Selector${NC}            ${BOLD}${YELLOW}║${NC}"
+    echo -e "${BOLD}${YELLOW}║${NC}            ${BOLD}${WHITE}SSH Machine Selector${NC}              ${BOLD}${YELLOW}║${NC}"
     echo -e "${BOLD}${YELLOW}╚══════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${YELLOW}Use ↑/↓ arrow keys to navigate, Enter to select, q to quit${NC}"
@@ -51,8 +51,6 @@ draw_menu() {
             echo -e "    ${name} ${BLUE}(${target})${NC}"
         fi
     done
-    
-    echo ""
     echo -e "${YELLOW}────────────────────────────────────────────────${NC}"
 }
 
