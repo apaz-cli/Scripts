@@ -1,0 +1,35 @@
+#!/bin/bash
+
+# Hardcoded machine definitions
+# Format: "NAME USER IP"
+machines=(
+  "Desktop apaz@100.122.100.39"
+  "Laptop apaz@100.89.140.15"
+  "Framework apaz@100.109.168.44"
+  "Raspi pi@100.111.205.41"
+  "Steamdeck deck@10.0.0.4"
+)
+
+# Display menu
+echo "Select machine to SSH into:"
+PS3="Enter choice (1-${#machines[@]}) or 'q' to quit: "
+
+select choice in "${machines[@]}"; do
+  if [[ "$REPLY" =~ ^[Qq]$ ]]; then
+    echo "Exiting."
+    exit 0
+  fi
+  
+  if [[ -z "$choice" ]]; then
+    echo "Invalid selection. Please try again."
+    continue
+  fi
+  
+  # Extract user@host from choice
+  # choice format is "NAME USER@IP"
+  ssh_target="${choice#* }"  # Remove first word (name)
+  
+  echo "Connecting to $ssh_target..."
+  ssh "$ssh_target"
+  break
+done
