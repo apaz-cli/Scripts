@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Hardcoded machine definitions
-# Format: "NAME USER IP"
+# Format: "NAME USER@IP"
 machines=(
   "Desktop apaz@100.122.100.39"
   "Laptop apaz@100.89.140.15"
@@ -10,26 +10,96 @@ machines=(
   "Steamdeck deck@10.0.0.4"
 )
 
-# Display menu
-echo "Select machine to SSH into:"
-PS3="Enter choice (1-${#machines[@]}) or 'q' to quit: "
+# Colors and formatting
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
+NC='\033[0m' # No Color
+BOLD='\033[1m'
 
-select choice in "${machines[@]}"; do
-  if [[ "$REPLY" =~ ^[Qq]$ ]]; then
-    echo "Exiting."
-    exit 0
-  fi
-  
-  if [[ -z "$choice" ]]; then
-    echo "Invalid selection. Please try again."
-    continue
-  fi
-  
-  # Extract user@host from choice
-  # choice format is "NAME USER@IP"
-  ssh_target="${choice#* }"  # Remove first word (name)
-  
-  echo "Connecting to $ssh_target..."
-  ssh "$ssh_target"
-  break
-done
+# Cursor control
+CURSOR_UP='\033[1A'
+CURSOR_DOWN='\033[1B'
+CLEAR_LINE='\033[2K'
+SAVE_CURSOR='\033[s'
+RESTORE_CURSOR='\033[u'
+
+selected=0
+total=${#machines[@]}
+
+# Function to draw the menu
+draw_menu() {
+    clear
+    echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}${CYAN}║${NC}            ${BOLD}${WHITE}SSH Machine Selector${NC}            ${BOLD}${CYAN}║${NC}"
+    echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${YELLOW}Use ↑/↓ arrow keys to navigate, Enter to select, q to quit${NC}"
+    echo ""
+    
+    for i in "${!machines[@]}"; do
+        machine="${machines[$i]}"
+        name="${machine%% *}"
+        target="${machine#* }"
+        
+        if [ $i -eq $selected ]; then
+            echo -e "  ${BOLD}${GREEN}► ${name}${NC} ${BOLD}${WHITE}(${target})${NC}"
+        else
+            echo -e "    ${name} ${BLUE}(${target})${NC}"
+        fi
+    done
+    
+    echo ""
+    echo -e "${CYAN}────────────────────────────────────────────────${NC}"
+}
+
+# Function to handle key input
+handle_input() {
+    while true; do
+        read -rsn1 key
+        
+        case "$key" in
+            $'\x1b')  # ESC sequence
+                read -rsn2 key
+                case "$key" in
+                    '[A')  # Up arrow
+                        ((selected--))
+                        if [ $selected -lt 0 ]; then
+                            selected=$((total - 1))
+                        fi
+                        draw_menu
+                        ;;
+                    '[B')  # Down arrow
+                        ((selected++))
+                        if [ $selected -ge $total ]; then
+                            selected=0
+                        fi
+                        draw_menu
+                        ;;
+                esac
+                ;;
+            '')  # Enter key
+                return 0
+                ;;
+            'q'|'Q')  # Quit
+                echo -e "\n${YELLOW}Exiting...${NC}"
+                exit 0
+                ;;
+        esac
+    done
+}
+
+# Main execution
+draw_menu
+handle_input
+
+# Extract user@host from selected choice
+choice="${machines[$selected]}"
+ssh_target="${choice#* }"  # Remove first word (name)
+name="${choice%% *}"
+
+echo -e "\n${GREEN}Connecting to ${BOLD}${name}${NC}${GREEN} (${ssh_target})...${NC}"
+ssh "$ssh_target"
