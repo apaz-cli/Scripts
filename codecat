@@ -4,14 +4,21 @@ VENV_DIR="/tmp/codecat_venv"
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 CODECAT_PY="$SCRIPT_DIR/.codecat.py"
 
-# Create venv if it doesn't exist
-if [ ! -d "$VENV_DIR" ]; then
-    python3 -m venv "$VENV_DIR"
-    source "$VENV_DIR/bin/activate"
-    pip install pygments
+# Check if pygments is already installed in the current environment
+if python3 -c "import pygments" 2>/dev/null; then
+    # Pygments is available, run directly
+    python3 "$CODECAT_PY" "$@"
 else
-    source "$VENV_DIR/bin/activate"
-fi
+    # Pygments not available, use venv
+    # Create venv if it doesn't exist
+    if [ ! -d "$VENV_DIR" ]; then
+        python3 -m venv "$VENV_DIR"
+        source "$VENV_DIR/bin/activate"
+        pip install pygments
+    else
+        source "$VENV_DIR/bin/activate"
+    fi
 
-# Run the Python script with all arguments
-python3 "$CODECAT_PY" "$@"
+    # Run the Python script with all arguments
+    python3 "$CODECAT_PY" "$@"
+fi

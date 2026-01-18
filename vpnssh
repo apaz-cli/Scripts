@@ -36,15 +36,15 @@ draw_menu() {
     echo -e "${BOLD}${YELLOW}╔══════════════════════════════════════════════╗${NC}"
     echo -e "${BOLD}${YELLOW}║${NC}            ${BOLD}${WHITE}SSH Machine Selector${NC}              ${BOLD}${YELLOW}║${NC}"
     echo -e "${BOLD}${YELLOW}╚══════════════════════════════════════════════╝${NC}"
-    echo ""
-    echo -e "${YELLOW}Use ↑/↓/←/→ arrow keys to navigate, 1-${total} for hotkeys, Enter to select, q to quit${NC}"
-    echo ""
-    
+#    echo ""
+#    echo -e "${YELLOW}Use ↑/↓/←/→ arrow keys to navigate, 1-${total} for hotkeys, Enter to select, q to quit${NC}"
+#    echo ""
+
     for i in "${!machines[@]}"; do
         machine="${machines[$i]}"
         name="${machine%% *}"
         target="${machine#* }"
-        
+
         if [ $i -eq $selected ]; then
             echo -e "  ${BOLD}${GREEN}► $((i+1)). ${name}${NC} ${BLUE}(${target})${NC}"
         else
@@ -58,7 +58,7 @@ draw_menu() {
 handle_input() {
     while true; do
         read -rsn1 key
-        
+
         case "$key" in
             $'\x1b')  # ESC sequence
                 read -rsn2 key

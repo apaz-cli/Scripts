@@ -5,7 +5,6 @@
 # Launch nano with:
 # -v : view mode (read-only)
 # -0 : interface hidden
-
 # This leaves just you and the text.
 
 nano -0v "$@"
