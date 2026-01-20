@@ -1,0 +1,150 @@
+#!/bin/sh
+
+
+MODEL_NAME="GLM-4.7-Flash-Q5_K_S.gguf"
+MODEL_REPO="unsloth/GLM-4.7-Flash-GGUF"
+CHAT_TEMPL="https://huggingface.co/unsloth/GLM-4.7-Flash/raw/main/chat_template.jinja"
+
+PROXIED_MODEL_NAME="openai/glm-4.7-flash"
+
+MODELS_PATH="$HOME/.ggml"
+MODEL_PATH="$MODELS_PATH/$MODEL_NAME"
+TEMPL_PATH="$MODELS_PATH/$MODEL_NAME""_chat_template.jinja"
+MODEL_URL="https://huggingface.co/$MODEL_REPO/resolve/main/$MODEL_NAME?download=true"
+
+LLAMA_CPP_PORT="9878"
+PROXIED_PORT="9879"
+
+REPO_PATH="/tmp/llama.cpp"
+LITELLM_PATH="/tmp/cc_litellm_venv"
+REPO_URL="https://github.com/ggml-org/llama.cpp"
+
+ANY_BUILD=0
+
+# Function to check if a port is in use
+check_port() {
+    local port=$1
+    if command -v ss >/dev/null 2>&1; then
+        ss -tuln | grep -q :"$port" && return 0 || return 1
+    elif command -v netstat >/dev/null 2>&1; then
+        netstat -tuln | grep -q :"$port" && return 0 || return 1
+    else
+        # Fallback to lsof if available
+        command -v lsof >/dev/null 2>&1 && lsof -i :"$port" >/dev/null 2>&1 && return 0 || return 1
+    fi
+}
+
+# Function to check if a process is running
+check_process() {
+    local process_name=$1
+    pgrep -f "$process_name" >/dev/null 2>&1 && return 0 || return 1
+}
+
+# Download model only if it doesn't exist
+if [ ! -f "$MODEL_PATH" ]; then
+  ANY_BUILD=1
+  echo "Downloading $MODEL_REPO."
+  mkdir -p "$(dirname "$MODEL_PATH")"
+  curl -sSL "$MODEL_URL" > "$MODEL_PATH" &
+  curl -sSL "$CHAT_TEMPL" > "$TEMPL_PATH" &
+fi
+
+# Create a venv with litellm proxy
+if [ ! -f "$LITELLM_PATH" ]; then
+  ANY_BUILD=1
+  echo "Setting up litellm proxy."
+  mkdir -p "$(dirname "$LITELLM_PATH")"
+  python -m venv "$LITELLM_PATH"
+  "$LITELLM_PATH/bin/pip" install 'litellm[proxy]' >/dev/null 2>&1 &
+fi
+
+# Clone llama.cpp only if it doesn't exist
+if [ ! -d "$REPO_PATH" ]; then
+  ANY_BUILD=1
+  echo "Compiling llama.cpp."
+  git clone "$REPO_URL" "$REPO_PATH" >/dev/null 2>&1
+
+  WD="$(pwd)"
+  cd "$REPO_PATH"
+
+  echo "Building llama.cpp."
+  cmake -B build -DGGML_CUDA=ON >/dev/null 2>&1
+  cmake --build build --config Release -j "$(nproc)" >/dev/null 2>&1 &
+
+  cd "$WD"
+fi
+
+if [ "$ANY_BUILD" = 1 ]; then
+  echo "Waiting for llama.cpp build and model download to complete."
+  wait
+fi
+
+# Start Model if not already running
+if ! check_port "$LLAMA_CPP_PORT"; then
+    echo "Starting llama-server on port $LLAMA_CPP_PORT"
+    CUDA_VISIBLE_DEVICES=0,1 \
+    "$REPO_PATH/build/bin/llama-server" \
+      -m "$MODEL_PATH" \
+      --host 0.0.0.0 \
+      --port "$LLAMA_CPP_PORT" \
+      --chat-template-file "$TEMPL_PATH" \
+      --jinja \
+      -ngl 99 \
+      -c 32768 \
+      --temp 0.2 \
+      --min-p 0.01 \
+      --top-p 0.95 \
+      --top-k 50 \
+      --dry-multiplier 1.1 \
+      >/tmp/llama_server_glm_logs 2>&1 \
+      &
+
+    # Wait a moment and check if it started successfully
+    sleep 3
+    if ! check_port "$LLAMA_CPP_PORT"; then
+        echo "ERROR: llama-server failed to start. Check logs at /tmp/llama_server_glm_logs"
+        tail -20 /tmp/llama_server_glm_logs
+        exit 1
+    fi
+    echo "llama-server started successfully"
+else
+    echo "llama-server already running on port $LLAMA_CPP_PORT"
+fi
+
+# Create Litellm config
+if [ ! -f /tmp/litellm_glm_config.yaml ]; then
+    cat > /tmp/litellm_glm_config.yaml <<EOF
+model_list:
+  - model_name: $MODEL_NAME
+    litellm_params:
+      model: $PROXIED_MODEL_NAME
+      api_base: http://127.0.0.1:$LLAMA_CPP_PORT/v1
+      api_key: sk-1234-meow
+
+general_settings:
+  master_key: sk-1234-meow
+EOF
+fi
+
+# Start Litellm Proxy if not already running
+if ! check_port "$PROXIED_PORT"; then
+    echo "Starting litellm proxy on port $PROXIED_PORT"
+    "$LITELLM_PATH/bin/litellm" \
+      --config /tmp/litellm_glm_config.yaml \
+      --port "$PROXIED_PORT" \
+      --num_workers 2 \
+      --telemetry False \
+      --drop_params \
+      >/tmp/litellm_glm_logs 2>&1 \
+      &
+else
+    echo "litellm proxy already running on port $PROXIED_PORT"
+fi
+
+# Wait for services to start
+sleep 2
+
+# Start claude code
+export ANTHROPIC_AUTH_TOKEN="sk-1234-meow"
+export ANTHROPIC_BASE_URL="http://127.0.0.1:$PROXIED_PORT"
+claude --model "$PROXIED_MODEL_NAME"
