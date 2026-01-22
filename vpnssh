@@ -1,0 +1,110 @@
+#!/bin/bash
+
+# Hardcoded machine definitions
+# Format: "NAME USER@IP"
+machines=(
+  "Desktop apaz@100.122.100.39"
+  "Laptop apaz@100.89.140.15"
+  "Framework apaz@100.109.168.44"
+  "Raspi pi@100.111.205.41"
+  "Steamdeck deck@10.0.0.4"
+)
+
+# Colors and formatting
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
+NC='\033[0m' # No Color
+BOLD='\033[1m'
+
+# Cursor control
+CURSOR_UP='\033[1A'
+CURSOR_DOWN='\033[1B'
+CLEAR_LINE='\033[2K'
+SAVE_CURSOR='\033[s'
+RESTORE_CURSOR='\033[u'
+
+selected=0
+total=${#machines[@]}
+
+# Function to draw the menu
+draw_menu() {
+    clear
+    echo -e "${BOLD}${YELLOW}╔══════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}${YELLOW}║${NC}            ${BOLD}${WHITE}SSH Machine Selector${NC}              ${BOLD}${YELLOW}║${NC}"
+    echo -e "${BOLD}${YELLOW}╚══════════════════════════════════════════════╝${NC}"
+#    echo ""
+#    echo -e "${YELLOW}Use ↑/↓/←/→ arrow keys to navigate, 1-${total} for hotkeys, Enter to select, q to quit${NC}"
+#    echo ""
+
+    for i in "${!machines[@]}"; do
+        machine="${machines[$i]}"
+        name="${machine%% *}"
+        target="${machine#* }"
+
+        if [ $i -eq $selected ]; then
+            echo -e "  ${BOLD}${GREEN}► $((i+1)). ${name}${NC} ${BLUE}(${target})${NC}"
+        else
+            echo -e "    $((i+1)). ${name} ${BLUE}(${target})${NC}"
+        fi
+    done
+    echo -e "${YELLOW}────────────────────────────────────────────────${NC}"
+}
+
+# Function to handle key input
+handle_input() {
+    while true; do
+        read -rsn1 key
+
+        case "$key" in
+            $'\x1b')  # ESC sequence
+                read -rsn2 key
+                case "$key" in
+                    '[A'|'[D')  # Up arrow or Left arrow
+                        ((selected--))
+                        if [ $selected -lt 0 ]; then
+                            selected=$((total - 1))
+                        fi
+                        draw_menu
+                        ;;
+                    '[B'|'[C')  # Down arrow or Right arrow
+                        ((selected++))
+                        if [ $selected -ge $total ]; then
+                            selected=0
+                        fi
+                        draw_menu
+                        ;;
+                esac
+                ;;
+            '')  # Enter key
+                return 0
+                ;;
+            'q'|'Q')  # Quit
+                echo -e "\n${YELLOW}Exiting...${NC}"
+                exit 0
+                ;;
+            [1-9])  # Number hotkeys
+                num=$((key - 1))
+                if [ $num -ge 0 ] && [ $num -lt $total ]; then
+                    selected=$num
+                    return 0
+                fi
+                ;;
+        esac
+    done
+}
+
+# Main execution
+draw_menu
+handle_input
+
+# Extract user@host from selected choice
+choice="${machines[$selected]}"
+ssh_target="${choice#* }"  # Remove first word (name)
+name="${choice%% *}"
+
+echo -e "\n${GREEN}Connecting to ${BOLD}${name}${NC}${GREEN} (${ssh_target})...${NC}"
+ssh "$ssh_target"
