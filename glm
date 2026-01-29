@@ -5,18 +5,14 @@ MODEL_NAME="GLM-4.7-Flash-Q5_K_S.gguf"
 MODEL_REPO="unsloth/GLM-4.7-Flash-GGUF"
 CHAT_TEMPL="https://huggingface.co/unsloth/GLM-4.7-Flash/raw/main/chat_template.jinja"
 
-PROXIED_MODEL_NAME="openai/glm-4.7-flash"
-
 MODELS_PATH="$HOME/.ggml"
 MODEL_PATH="$MODELS_PATH/$MODEL_NAME"
 TEMPL_PATH="$MODELS_PATH/$MODEL_NAME""_chat_template.jinja"
 MODEL_URL="https://huggingface.co/$MODEL_REPO/resolve/main/$MODEL_NAME?download=true"
 
 LLAMA_CPP_PORT="9878"
-PROXIED_PORT="9879"
 
 REPO_PATH="/tmp/llama.cpp"
-LITELLM_PATH="/tmp/cc_litellm_venv"
 REPO_URL="https://github.com/ggml-org/llama.cpp"
 
 ANY_BUILD=0
@@ -34,12 +30,6 @@ check_port() {
     fi
 }
 
-# Function to check if a process is running
-check_process() {
-    local process_name=$1
-    pgrep -f "$process_name" >/dev/null 2>&1 && return 0 || return 1
-}
-
 # Download model only if it doesn't exist
 if [ ! -f "$MODEL_PATH" ]; then
   ANY_BUILD=1
@@ -47,15 +37,6 @@ if [ ! -f "$MODEL_PATH" ]; then
   mkdir -p "$(dirname "$MODEL_PATH")"
   curl -sSL "$MODEL_URL" > "$MODEL_PATH" &
   curl -sSL "$CHAT_TEMPL" > "$TEMPL_PATH" &
-fi
-
-# Create a venv with litellm proxy
-if [ ! -f "$LITELLM_PATH" ]; then
-  ANY_BUILD=1
-  echo "Setting up litellm proxy."
-  mkdir -p "$(dirname "$LITELLM_PATH")"
-  python -m venv "$LITELLM_PATH"
-  "$LITELLM_PATH/bin/pip" install 'litellm[proxy]' >/dev/null 2>&1 &
 fi
 
 # Clone llama.cpp only if it doesn't exist
@@ -90,12 +71,13 @@ if ! check_port "$LLAMA_CPP_PORT"; then
       --chat-template-file "$TEMPL_PATH" \
       --jinja \
       -ngl 99 \
-      -c 32768 \
-      --temp 0.2 \
+      -c 65536 \
+      --temp 0.7 \
       --min-p 0.01 \
       --top-p 0.95 \
       --top-k 50 \
       --dry-multiplier 1.1 \
+      --verbose \
       >/tmp/llama_server_glm_logs 2>&1 \
       &
 
@@ -111,40 +93,7 @@ else
     echo "llama-server already running on port $LLAMA_CPP_PORT"
 fi
 
-# Create Litellm config
-if [ ! -f /tmp/litellm_glm_config.yaml ]; then
-    cat > /tmp/litellm_glm_config.yaml <<EOF
-model_list:
-  - model_name: $MODEL_NAME
-    litellm_params:
-      model: $PROXIED_MODEL_NAME
-      api_base: http://127.0.0.1:$LLAMA_CPP_PORT/v1
-      api_key: sk-1234-meow
-
-general_settings:
-  master_key: sk-1234-meow
-EOF
-fi
-
-# Start Litellm Proxy if not already running
-if ! check_port "$PROXIED_PORT"; then
-    echo "Starting litellm proxy on port $PROXIED_PORT"
-    "$LITELLM_PATH/bin/litellm" \
-      --config /tmp/litellm_glm_config.yaml \
-      --port "$PROXIED_PORT" \
-      --num_workers 2 \
-      --telemetry False \
-      --drop_params \
-      >/tmp/litellm_glm_logs 2>&1 \
-      &
-else
-    echo "litellm proxy already running on port $PROXIED_PORT"
-fi
-
-# Wait for services to start
-sleep 2
-
-# Start claude code
-export ANTHROPIC_AUTH_TOKEN="sk-1234-meow"
-export ANTHROPIC_BASE_URL="http://127.0.0.1:$PROXIED_PORT"
-claude --model "$PROXIED_MODEL_NAME"
+# Start claude code - point directly at llama-server's Anthropic-compatible endpoint
+export ANTHROPIC_AUTH_TOKEN="sk-no-key-required"
+export ANTHROPIC_BASE_URL="http://127.0.0.1:$LLAMA_CPP_PORT"
+claude --model "glm-4.7-flash"

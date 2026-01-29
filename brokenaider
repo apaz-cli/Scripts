@@ -1,0 +1,3 @@
+#!/bin/sh
+
+/home/apaz/git/aider/.venv/bin/aider --cache-prompts --dark-mode --model claude-sonnet-4-5 "$@"

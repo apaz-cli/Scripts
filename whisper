@@ -1,0 +1,8 @@
+#!/bin/sh
+
+WD="$(pwd)"
+cd ~/git/whisper
+
+. .venv/bin/activate
+cd "$WD"
+whisper --model medium.en "$@" --output_format txt --output_dir . >/dev/null

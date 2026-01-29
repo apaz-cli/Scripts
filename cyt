@@ -1,0 +1,3 @@
+#!/bin/sh
+
+yt --cookies-from-browser firefox "$@"

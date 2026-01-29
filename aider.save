@@ -1,0 +1,99 @@
+#!/bin/sh
+
+CURRENT_WD="$(pwd)"
+PARENT_DIR="/tmp"
+AIDER_DIR="$PARENT_DIR/aider"
+AIDER_BIN="$AIDER_DIR/.venv/bin/aider"
+MODEL=""
+
+
+if [ ! -d "$AIDER_DIR" ]; then
+    echo "Installing aider."
+    cd "$PARENT_DIR"
+    git clone --depth=1 https://github.com/paul-gauthier/aider
+    cd aider/
+    python -m venv .venv
+    . .venv/bin/activate
+    .venv/bin/pip install -e .
+    # .venv/bin/pip install --upgrade --upgrade-strategy only-if-needed 'aider-chat[browser]'
+    # .venv/bin/pip install --upgrade --upgrade-strategy only-if-needed 'aider-chat[playwright]'
+    # .venv/bin/python3 -m playwright install --with-deps chromium
+fi
+cd "$CURRENT_WD"
+
+# Parse args
+# Args:
+# -n, --no-conventions
+# -l, --lucy # A personality extension. More to come later.
+
+DEFAULT_CONVENTIONS="true"
+LUCY_CONVENTIONS="false"
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            echo "Usage: aider [options] [args]"
+            echo "Options:"
+            echo "  -n, --no-conventions  Remove all conventions files (including the default)."
+            echo "  -l, --lucy            Add the Lucy conventions file."
+            echo "  -d, --deepseek        Use DeepSeek model."
+            echo "  -o, --opus            Use Claude Opus model."
+            echo "  -h, --help            Show this help message."
+            echo ""
+            if [ -f "$AIDER_BIN" ]; then
+                echo "Aider help:"
+                $AIDER_BIN --help
+            fi
+            exit 0
+            ;;
+        -d|--deepseek)
+            MODEL="--model deepseek/deepseek-chat"
+            shift
+            ;;
+        -o|--opus)
+            MODEL="--model claude-opus-4-20250514"
+            shift
+            ;;
+        -n|--no-conventions)
+            DEFAULT_CONVENTIONS="false"
+            LUCY_CONVENTIONS="false"
+            shift
+            ;;
+        -l|--lucy)
+            LUCY_CONVENTIONS="true"
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# If no secrets repo is present, no conventions. Otherwise, use them.
+if [ ! -d "$SECRETS_DIR" ]; then
+    echo "No conventions found. Clone and extract the secrets dir to set up conventions." >&2
+    DEFAULT_CONVENTIONS="false"
+    LUCY_CONVENTIONS="false"
+else
+    DEFAULT_CONVENTIONS_PATH="$SECRETS_DIR/secrets/CONVENTIONS.md"
+    LUCY_CONVENTIONS_PATH="$SECRETS_DIR/secrets/LUCY.md"
+fi
+
+# Add together all the flags necessary.
+ALL_CONVENTIONS=""
+if [ "$DEFAULT_CONVENTIONS" = "true" ]; then
+    if [ ! -f "$DEFAULT_CONVENTIONS_PATH" ]; then
+        echo "Default conventions file not found." >&2
+    else
+        ALL_CONVENTIONS="$ALL_CONVENTIONS --read $DEFAULT_CONVENTIONS_PATH"
+    fi
+fi
+if [ "$LUCY_CONVENTIONS" = "true" ]; then
+    if [ ! -f "$LUCY_CONVENTIONS_PATH" ]; then
+        echo "Lucy conventions file not found." >&2
+    else
+        ALL_CONVENTIONS="$ALL_CONVENTIONS --read $LUCY_CONVENTIONS_PATH"
+    fi
+fi
+
+# Finally run the command.
+$AIDER_BIN $ALL_CONVENTIONS $MODEL $HELP --cache-prompts --dark-mode "$@"

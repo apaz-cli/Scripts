@@ -49,7 +49,7 @@ FOLDED="$TMP/out.perf-folded"
 SVG="$TMP/perf.svg"
 
 # Run the program to collect perf data
-perf record -o "$DATA" -F 15500 -g --call-graph dwarf "$@" 2>/dev/null >/dev/null
+perf record -o "$DATA" -F 15500 -g --call-graph dwarf "$@" #2>/dev/null >/dev/null
 if [ $? -ne 0 ]; then
   echo "Failed to run perf record for: " "$@"
   exit 1

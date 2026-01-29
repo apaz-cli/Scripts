@@ -2,9 +2,26 @@
 
 # TODO: Check against "record" script.
 
+#ffmpeg -f x11grab -y \
+#  -framerate 10 \
+#  -s 3840x2160 \
+#  -i :0.0 -c:v libx264 \
+#  -preset superfast -crf 18 \
+#  "$(date +'%Y-%m-%d_%H-%M-%S').mp4"
+
+
+#ffmpeg -f x11grab -y \
+#  -framerate 10 -s 3840x2160 -i :0.0 \
+#  -f alsa -i hw:0 \
+#  -c:v libx264 -preset superfast -crf 18 \
+#  -c:a aac -b:a 128k \
+#  "$(date +'%Y-%m-%d_%H-%M-%S').mp4"
+
+#!/bin/sh
+
 ffmpeg -f x11grab -y \
-  -framerate 10 \
-  -s 3840x2160 \
-  -i :0.0 -c:v libx264 \
-  -preset superfast -crf 18 \
+  -framerate 10 -s 3840x2160 -i :0.0 \
+  -f pulse -i alsa_output.usb-Corsair_CORSAIR_VOID_ELITE_Wireless_Gaming_Dongle-00.analog-stereo.monitor \
+  -c:v libx264 -preset superfast -crf 18 \
+  -c:a aac -b:a 128k \
   "$(date +'%Y-%m-%d_%H-%M-%S').mp4"

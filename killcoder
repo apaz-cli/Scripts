@@ -1,0 +1,5 @@
+#!/bin/sh
+
+killall llama-server 2>/dev/null
+killall litellm 2>/dev/null
+exit 0

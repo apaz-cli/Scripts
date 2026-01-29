@@ -1,0 +1,3 @@
+#!/bin/sh
+
+ytdl --cookies-from-browser firefox "$@"
