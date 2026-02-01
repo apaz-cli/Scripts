@@ -1,11 +1,59 @@
 #!/usr/bin/env python3
 """nanocode - minimal claude code alternative"""
 
-import atexit, glob as globlib, json, os, re, readline, subprocess, urllib.request
+import argparse, atexit, glob as globlib, json, os, re, readline, subprocess, sys, urllib.request
 
-OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY")
-API_URL = "https://openrouter.ai/api/v1/messages" if OPENROUTER_KEY else "https://api.anthropic.com/v1/messages"
-MODEL = os.environ.get("MODEL", "anthropic/claude-opus-4.5" if OPENROUTER_KEY else "claude-opus-4-5")
+# Parse args
+parser = argparse.ArgumentParser(
+    prog="nanocode",
+    description="Minimal Claude Code alternative - an agentic coding assistant",
+    formatter_class=argparse.RawDescriptionHelpFormatter,
+    epilog="""
+presets:
+  --deepseek          Use DeepSeek API (requires DEEPSEEK_API_KEY)
+  --glm               Use local GLM server at 127.0.0.1:9878
+
+environment variables:
+  ANTHROPIC_API_KEY   API key for Anthropic (default provider)
+  OPENROUTER_API_KEY  API key for OpenRouter (auto-detected)
+  DEEPSEEK_API_KEY    API key for DeepSeek (with --deepseek)
+  MODEL               Override default model
+
+commands (in chat):
+  /q, exit            Quit
+  /c                  Clear conversation
+"""
+)
+preset = parser.add_mutually_exclusive_group()
+preset.add_argument("--deepseek", action="store_true", help="use DeepSeek API")
+preset.add_argument("--glm", action="store_true", help="use local GLM server")
+parser.add_argument("--model", "-m", help="model name to use")
+parser.add_argument("--base-url", dest="base_url", help="API base URL")
+parser.add_argument("--api-style", dest="api_style", choices=["openai", "anthropic"], help="API style")
+parser.add_argument("--dangerously-skip-permissions", action="store_true", help="skip confirmation prompts for bash commands")
+args = parser.parse_args()
+
+# Presets and config
+if args.deepseek:
+    BASE_URL = "https://api.deepseek.com"
+    MODEL = args.model or "deepseek-chat"
+    API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+    API_STYLE = "openai"
+elif args.glm:
+    BASE_URL = "http://127.0.0.1:9878"
+    MODEL = args.model or "glm-4.7-flash"
+    API_KEY = "sk-no-key-required"
+    API_STYLE = "openai"
+else:
+    OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY")
+    BASE_URL = args.base_url or ("https://openrouter.ai/api" if OPENROUTER_KEY else "https://api.anthropic.com")
+    MODEL = args.model or os.environ.get("MODEL", "anthropic/claude-opus-4.5" if OPENROUTER_KEY else "claude-opus-4-5")
+    API_KEY = OPENROUTER_KEY if OPENROUTER_KEY else os.environ.get("ANTHROPIC_API_KEY", "")
+    API_STYLE = args.api_style or ("openai" if OPENROUTER_KEY else "anthropic")
+if args.api_style:
+    API_STYLE = args.api_style
+API_URL = BASE_URL + ("/v1/chat/completions" if API_STYLE == "openai" else "/v1/messages")
+SKIP_CONFIRM = args.dangerously_skip_permissions
 
 # ANSI colors
 RESET, BOLD, DIM = "\033[0m", "\033[1m", "\033[2m"
@@ -91,44 +139,24 @@ def bash(args):
     return "".join(output_lines).strip() or "(empty)"
 
 
-# --- Tool definitions: (description, schema, function) ---
+# --- Tool definitions: (description, schema, function, needs_confirm) ---
 
 TOOLS = {
-    "read": (
-        "Read file with line numbers (file path, not directory)",
-        {"path": "string", "offset": "number?", "limit": "number?"},
-        read,
-    ),
-    "write": (
-        "Write content to file",
-        {"path": "string", "content": "string"},
-        write,
-    ),
-    "edit": (
-        "Replace old with new in file (old must be unique unless all=true)",
-        {"path": "string", "old": "string", "new": "string", "all": "boolean?"},
-        edit,
-    ),
-    "glob": (
-        "Find files by pattern, sorted by mtime",
-        {"pat": "string", "path": "string?"},
-        glob,
-    ),
-    "grep": (
-        "Search files for regex pattern",
-        {"pat": "string", "path": "string?"},
-        grep,
-    ),
-    "bash": (
-        "Run shell command",
-        {"cmd": "string"},
-        bash,
-    ),
+    "read":  ("Read file with line numbers (file path, not directory)", {"path": "string", "offset": "number?", "limit": "number?"}, read, False),
+    "write": ("Write content to file", {"path": "string", "content": "string"}, write, False),
+    "edit":  ("Replace old with new in file (old must be unique unless all=true)", {"path": "string", "old": "string", "new": "string", "all": "boolean?"}, edit, False),
+    "glob":  ("Find files by pattern, sorted by mtime", {"pat": "string", "path": "string?"}, glob, False),
+    "grep":  ("Search files for regex pattern", {"pat": "string", "path": "string?"}, grep, False),
+    "bash":  ("Run shell command", {"cmd": "string"}, bash, True),
 }
 
 
 def run_tool(name, args):
     try:
+        if TOOLS[name][3] and not SKIP_CONFIRM:  # needs_confirm
+            print(f"  {YELLOW}{json.dumps(args, indent=2)}{RESET}")
+            if input(f"  {YELLOW}Run? [y/N]: {RESET}").strip().lower() not in ("y", "yes"):
+                return "(cancelled by user)"
         return TOOLS[name][2](args)
     except Exception as err:
         return f"error: {err}"
@@ -136,51 +164,40 @@ def run_tool(name, args):
 
 def make_schema():
     result = []
-    for name, (description, params, _fn) in TOOLS.items():
-        properties = {}
-        required = []
-        for param_name, param_type in params.items():
-            is_optional = param_type.endswith("?")
-            base_type = param_type.rstrip("?")
-            properties[param_name] = {
-                "type": "integer" if base_type == "number" else base_type
-            }
-            if not is_optional:
-                required.append(param_name)
-        result.append(
-            {
-                "name": name,
-                "description": description,
-                "input_schema": {
-                    "type": "object",
-                    "properties": properties,
-                    "required": required,
-                },
-            }
-        )
+    for name, (desc, params, _, _) in TOOLS.items():
+        props = {p: {"type": "integer" if t.rstrip("?") == "number" else t.rstrip("?")} for p, t in params.items()}
+        req = [p for p, t in params.items() if not t.endswith("?")]
+        schema = {"type": "object", "properties": props, "required": req}
+        result.append({"type": "function", "function": {"name": name, "description": desc, "parameters": schema}} if API_STYLE == "openai"
+                      else {"name": name, "description": desc, "input_schema": schema})
     return result
 
+def to_oai(msgs):
+    out = []
+    for m in msgs:
+        c = m["content"]
+        if isinstance(c, list) and c and c[0].get("type") == "tool_result":
+            out += [{"role": "tool", "tool_call_id": t["tool_use_id"], "content": t["content"]} for t in c]
+        elif isinstance(c, list):
+            tc = [{"id": b["id"], "type": "function", "function": {"name": b["name"], "arguments": json.dumps(b["input"])}} for b in c if b.get("type") == "tool_use"]
+            out.append({"role": "assistant", "content": "".join(b.get("text", "") for b in c if b.get("type") == "text") or None, **({"tool_calls": tc} if tc else {})})
+        else: out.append(m)
+    return out
+
+def from_oai(r):
+    m = r["choices"][0]["message"]
+    return {"content": ([{"type": "text", "text": m["content"]}] if m.get("content") else []) +
+            [{"type": "tool_use", "id": t["id"], "name": t["function"]["name"], "input": json.loads(t["function"]["arguments"])} for t in m.get("tool_calls", [])]}
 
 def call_api(messages, system_prompt):
-    request = urllib.request.Request(
-        API_URL,
-        data=json.dumps(
-            {
-                "model": MODEL,
-                "max_tokens": 8192,
-                "system": system_prompt,
-                "messages": messages,
-                "tools": make_schema(),
-            }
-        ).encode(),
-        headers={
-            "Content-Type": "application/json",
-            "anthropic-version": "2023-06-01",
-            **({"Authorization": f"Bearer {OPENROUTER_KEY}"} if OPENROUTER_KEY else {"x-api-key": os.environ.get("ANTHROPIC_API_KEY", "")}),
-        },
-    )
-    response = urllib.request.urlopen(request)
-    return json.loads(response.read())
+    if API_STYLE == "openai":
+        hdrs = {"Content-Type": "application/json", "Authorization": f"Bearer {API_KEY}"}
+        body = {"model": MODEL, "max_tokens": 8192, "messages": [{"role": "system", "content": system_prompt}] + to_oai(messages), "tools": make_schema()}
+    else:
+        hdrs = {"Content-Type": "application/json", "anthropic-version": "2023-06-01", "x-api-key": API_KEY}
+        body = {"model": MODEL, "max_tokens": 8192, "system": system_prompt, "messages": messages, "tools": make_schema()}
+    resp = json.loads(urllib.request.urlopen(urllib.request.Request(API_URL, json.dumps(body).encode(), hdrs)).read())
+    return from_oai(resp) if API_STYLE == "openai" else resp
 
 
 def separator():
@@ -192,7 +209,7 @@ def render_markdown(text):
 
 
 def main():
-    print(f"{BOLD}nanocode{RESET} | {DIM}{MODEL} ({'OpenRouter' if OPENROUTER_KEY else 'Anthropic'}) | {os.getcwd()}{RESET}\n")
+    print(f"{BOLD}nanocode{RESET} | {DIM}{MODEL} | {os.getcwd()}{RESET}\n")
     
     # Readline history
     histfile = "/tmp/.nanocode_history"

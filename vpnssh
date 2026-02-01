@@ -3,9 +3,9 @@
 # Hardcoded machine definitions
 # Format: "NAME USER@IP"
 machines=(
-  "Desktop apaz@100.122.100.39"
+  "Desktop apaz@100.114.164.73"
   "Laptop apaz@100.89.140.15"
-  "Framework apaz@100.109.168.44"
+  "Framework apaz@100.100.224.32"
   "Raspi pi@100.111.205.41"
   "Steamdeck deck@10.0.0.4"
 )

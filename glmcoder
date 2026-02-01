@@ -1,0 +1,32 @@
+#!/bin/sh
+
+LLAMA_CPP_PORT="9878"
+
+# Function to check if a port is in use
+check_port() {
+    local port=$1
+    if command -v ss >/dev/null 2>&1; then
+        ss -tuln | grep -q :"$port" && return 0 || return 1
+    elif command -v netstat >/dev/null 2>&1; then
+        netstat -tuln | grep -q :"$port" && return 0 || return 1
+    else
+        # Fallback to lsof if available
+        command -v lsof >/dev/null 2>&1 && lsof -i :"$port" >/dev/null 2>&1 && return 0 || return 1
+    fi
+}
+
+# Check if server is running, start it if not
+if ! check_port "$LLAMA_CPP_PORT"; then
+    echo "llama-server not running, starting it..."
+    SCRIPT_DIR="$(dirname "$0")"
+    "$SCRIPT_DIR/glmstart"
+    if [ $? -ne 0 ]; then
+        echo "Failed to start llama-server"
+        exit 1
+    fi
+fi
+
+# Start claude code - point directly at llama-server's Anthropic-compatible endpoint
+export ANTHROPIC_AUTH_TOKEN="sk-no-key-required"
+export ANTHROPIC_BASE_URL="http://127.0.0.1:$LLAMA_CPP_PORT"
+claude --model "glm-4.7-flash"

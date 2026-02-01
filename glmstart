@@ -1,6 +1,5 @@
 #!/bin/sh
 
-
 MODEL_NAME="GLM-4.7-Flash-Q5_K_S.gguf"
 MODEL_REPO="unsloth/GLM-4.7-Flash-GGUF"
 CHAT_TEMPL="https://huggingface.co/unsloth/GLM-4.7-Flash/raw/main/chat_template.jinja"
@@ -92,8 +91,3 @@ if ! check_port "$LLAMA_CPP_PORT"; then
 else
     echo "llama-server already running on port $LLAMA_CPP_PORT"
 fi
-
-# Start claude code - point directly at llama-server's Anthropic-compatible endpoint
-export ANTHROPIC_AUTH_TOKEN="sk-no-key-required"
-export ANTHROPIC_BASE_URL="http://127.0.0.1:$LLAMA_CPP_PORT"
-claude --model "glm-4.7-flash"

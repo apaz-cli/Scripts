@@ -1,0 +1,44 @@
+#!/bin/sh
+
+LLAMA_CPP_PORT="9878"
+
+# Function to check if a port is in use
+check_port() {
+    local port=$1
+    if command -v ss >/dev/null 2>&1; then
+        ss -tuln | grep -q :"$port" && return 0 || return 1
+    elif command -v netstat >/dev/null 2>&1; then
+        netstat -tuln | grep -q :"$port" && return 0 || return 1
+    else
+        # Fallback to lsof if available
+        command -v lsof >/dev/null 2>&1 && lsof -i :"$port" >/dev/null 2>&1 && return 0 || return 1
+    fi
+}
+
+if ! check_port "$LLAMA_CPP_PORT"; then
+    echo "llama-server is not running on port $LLAMA_CPP_PORT"
+    exit 0
+fi
+
+# Find and kill the llama-server process
+if command -v lsof >/dev/null 2>&1; then
+    PID=$(lsof -t -i :"$LLAMA_CPP_PORT" 2>/dev/null)
+elif command -v ss >/dev/null 2>&1; then
+    PID=$(ss -tlnp | grep :"$LLAMA_CPP_PORT" | sed -n 's/.*pid=\([0-9]*\).*/\1/p')
+elif command -v netstat >/dev/null 2>&1; then
+    PID=$(netstat -tlnp 2>/dev/null | grep :"$LLAMA_CPP_PORT" | awk '{print $7}' | cut -d'/' -f1)
+fi
+
+if [ -n "$PID" ]; then
+    echo "Stopping llama-server (PID: $PID)"
+    kill "$PID"
+    sleep 1
+    if check_port "$LLAMA_CPP_PORT"; then
+        echo "Process still running, sending SIGKILL"
+        kill -9 "$PID" 2>/dev/null
+    fi
+    echo "llama-server stopped"
+else
+    echo "Could not find llama-server process"
+    exit 1
+fi
