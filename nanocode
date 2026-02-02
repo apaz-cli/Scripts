@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """nanocode - minimal claude code alternative"""
 
-import argparse, atexit, glob as globlib, json, os, re, readline, subprocess, sys, urllib.request
+import argparse, atexit, glob as globlib, json, os, re, readline, subprocess, sys, urllib.error, urllib.parse, urllib.request, html
+
 
 # Parse args
 parser = argparse.ArgumentParser(
@@ -22,6 +23,11 @@ environment variables:
 commands (in chat):
   /q, exit            Quit
   /c                  Clear conversation
+
+modes (type alone to switch):
+  #                   Chat mode (default)
+  !                   Command mode (next input runs as bash)
+  $                   Plan mode (next input spawns planning subagent)
 """
 )
 preset = parser.add_mutually_exclusive_group()
@@ -31,6 +37,7 @@ parser.add_argument("--model", "-m", help="model name to use")
 parser.add_argument("--base-url", dest="base_url", help="API base URL")
 parser.add_argument("--api-style", dest="api_style", choices=["openai", "anthropic"], help="API style")
 parser.add_argument("--dangerously-skip-permissions", action="store_true", help="skip confirmation prompts for bash commands")
+parser.add_argument("--planning", nargs=3, metavar=("TASK", "CTX", "OUT"), help=argparse.SUPPRESS)
 args = parser.parse_args()
 
 # Presets and config
@@ -117,6 +124,48 @@ def grep(args):
     return "\n".join(hits[:50]) or "none"
 
 
+_WEB_SEARCH_PATTERN = re.compile(
+    r'class="result__a"[^>]*>(.*?)</a>'    # title
+    r'.*?'                                  # stuff between
+    r'class="result__snippet"[^>]*'
+    r'href="([^"]+)"[^>]*>(.*?)</a>',       # href + body
+    re.DOTALL
+)
+
+
+def web_search(args):
+    query = args["query"]
+    try:
+        res = urllib.request.urlopen(urllib.request.Request(
+            "https://html.duckduckgo.com/html/",
+            urllib.parse.urlencode({"q": query}).encode(),
+            {"User-Agent": "Mozilla/5.0"}
+        ), timeout=10).read().decode()
+    except urllib.error.HTTPError as e:
+        return f"error: HTTP {e.code}: {e.reason}"
+    except urllib.error.URLError as e:
+        return f"error: {e.reason}"
+    except TimeoutError:
+        return "error: request timed out"
+
+    def _clean_html(s):
+        return html.unescape(re.sub(r'<[^>]+>', '', s)).strip()
+
+    results = []
+    for title, href, body in _WEB_SEARCH_PATTERN.findall(res):
+        if href.startswith("https://duckduckgo.com/y.js?"):
+            continue
+        results.append({"title": _clean_html(title), "href": href, "body": _clean_html(body)})
+
+    if not results:
+        return "No results found."
+
+    lines = []
+    for i, r in enumerate(results, 1):
+        lines.append(f"[{i}] {r['title']}\nURL: {r['href']}\n{r['body']}")
+    return "\n\n".join(lines)
+
+
 def bash(args):
     proc = subprocess.Popen(
         args["cmd"], shell=True,
@@ -141,14 +190,24 @@ def bash(args):
 
 # --- Tool definitions: (description, schema, function, needs_confirm) ---
 
+def plan(a):
+    ctx, out = f"/tmp/.nanocode_ctx_{os.getpid()}.json", f"/tmp/.nanocode_out_{os.getpid()}.txt"
+    json.dump(_msgs, open(ctx, 'w'))
+    subprocess.run(["nanocode", "--planning", a["task"], ctx, out] + (["--dangerously-skip-permissions"] if SKIP_CONFIRM else []))
+    return open(out).read() if os.path.exists(out) else "Planning failed"
+
 TOOLS = {
-    "read":  ("Read file with line numbers (file path, not directory)", {"path": "string", "offset": "number?", "limit": "number?"}, read, False),
-    "write": ("Write content to file", {"path": "string", "content": "string"}, write, False),
-    "edit":  ("Replace old with new in file (old must be unique unless all=true)", {"path": "string", "old": "string", "new": "string", "all": "boolean?"}, edit, False),
-    "glob":  ("Find files by pattern, sorted by mtime", {"pat": "string", "path": "string?"}, glob, False),
-    "grep":  ("Search files for regex pattern", {"pat": "string", "path": "string?"}, grep, False),
-    "bash":  ("Run shell command", {"cmd": "string"}, bash, True),
+    "read":       ("Read file with line numbers (file path, not directory)", {"path": "string", "offset": "number?", "limit": "number?"}, read, False),
+    "write":      ("Write content to file", {"path": "string", "content": "string"}, write, False),
+    "edit":       ("Replace old with new in file (old must be unique unless all=true)", {"path": "string", "old": "string", "new": "string", "all": "boolean?"}, edit, False),
+    "glob":       ("Find files by pattern, sorted by mtime", {"pat": "string", "path": "string?"}, glob, False),
+    "grep":       ("Search files for regex pattern", {"pat": "string", "path": "string?"}, grep, False),
+    "bash":       ("Run shell command", {"cmd": "string"}, bash, True),
+    "web_search": ("Search the web via DuckDuckGo", {"query": "string"}, web_search, False),
+    "plan":       ("Spawn a planning subagent to analyze a task and create a detailed plan", {"task": "string"}, plan, False),
 }
+if args.planning:
+  del TOOLS["plan"]  # Prevent recurse
 
 
 def run_tool(name, args):
@@ -208,84 +267,99 @@ def render_markdown(text):
     return re.sub(r"\*\*(.+?)\*\*", f"{BOLD}\\1{RESET}", text)
 
 
+_msgs = []  # global for plan tool access
+
+def agent_loop(messages, system_prompt):
+    """Run agentic loop until no more tool calls. Returns final response text."""
+    while True:
+        response = call_api(messages, system_prompt)
+        content_blocks = response.get("content", [])
+        # Retry on malformed tool call tags
+        response_text = "".join(b.get("text", "") for b in content_blocks if b.get("type") == "text")
+        if re.search(r"<\n+tool_call>", response_text):
+            print(f"  {DIM}(retrying malformed tool_call){RESET}")
+            continue
+        if "<tool_call>" in response_text and response_text.count("<arg_value>") != response_text.count("</arg_value>"):
+            print(f"  {DIM}(retrying mismatched tags){RESET}")
+            continue
+        tool_results = []
+        for block in content_blocks:
+            if block["type"] == "text":
+                print(f"\n{CYAN}⏺{RESET} {render_markdown(block['text'])}")
+            if block["type"] == "tool_use":
+                name, a = block["name"], block["input"]
+                print(f"\n{GREEN}⏺ {name.capitalize()}{RESET}({DIM}{str(list(a.values())[0])[:50]}{RESET})")
+                result = run_tool(name, a)
+                preview = result.split("\n")[0][:60] + ("..." if len(result) > 60 else "")
+                if result.count("\n") > 0: preview = result.split("\n")[0][:60] + f" ... +{result.count(chr(10))} lines"
+                print(f"  {DIM}⎿  {preview}{RESET}")
+                tool_results.append({"type": "tool_result", "tool_use_id": block["id"], "content": result})
+        messages.append({"role": "assistant", "content": content_blocks})
+        if not tool_results:
+            return "".join(b.get("text", "") for b in content_blocks if b["type"] == "text")
+        messages.append({"role": "user", "content": tool_results})
+
+PLAN_PROMPT = f"""You are a planning assistant. Analyze the task thoroughly and create a detailed implementation plan.
+Use tools to explore the codebase and understand the problem. When done, you will be asked to summarize your plan.
+cwd: {os.getcwd()}"""
+
 def main():
+    global _msgs
+    if args.planning:
+        task, ctx_file, out_file = args.planning
+        messages = json.load(open(ctx_file)) if os.path.exists(ctx_file) else []
+        _msgs = messages
+        print(f"{BOLD}nanocode planning{RESET} | {DIM}{task[:50]}{RESET}\n")
+        messages.append({"role": "user", "content": task})
+        agent_loop(messages, PLAN_PROMPT)
+        messages.append({"role": "user", "content": "Summarize your plan with all information needed to execute it."})
+        result = agent_loop(messages, PLAN_PROMPT)
+        open(out_file, 'w').write(result)
+        return
+
     print(f"{BOLD}nanocode{RESET} | {DIM}{MODEL} | {os.getcwd()}{RESET}\n")
-    
-    # Readline history
     histfile = "/tmp/.nanocode_history"
-    try:
-        readline.read_history_file(histfile)
-    except FileNotFoundError:
-        pass
+    try: readline.read_history_file(histfile)
+    except FileNotFoundError: pass
     readline.set_history_length(1000)
     atexit.register(readline.write_history_file, histfile)
-    
-    messages = []
+
+    messages, mode = [], "#"
+    _msgs = messages
     system_prompt = f"Concise coding assistant. cwd: {os.getcwd()}"
 
     while True:
         try:
             print(separator())
-            user_input = input(f"{BOLD}{BLUE}❯{RESET} ").strip()
+            user_input = input(f"{BOLD}{BLUE}{mode}{RESET} ").strip()
             print(separator())
-            if not user_input:
-                continue
-            if user_input in ("/q", "exit"):
-                break
+            if not user_input: continue
+            if user_input in ("/q", "exit"): break
             if user_input == "/c":
-                messages = []
-                print(f"{GREEN}⏺ Cleared conversation{RESET}")
+                messages.clear()
+                print(f"{GREEN}⏺ Cleared{RESET}")
+                continue
+            if user_input in ("#", "!", "$"):
+                mode = user_input
+                continue
+
+            if mode == "!":
+                print(bash({"cmd": user_input}))
+                mode = "#"
+                continue
+            if mode == "$":
+                result = plan({"task": user_input})
+                messages.append({"role": "user", "content": f"[Plan request: {user_input}]"})
+                messages.append({"role": "assistant", "content": [{"type": "text", "text": result}]})
+                print(f"\n{CYAN}⏺{RESET} {render_markdown(result)}")
+                mode = "#"
                 continue
 
             messages.append({"role": "user", "content": user_input})
-
-            # agentic loop: keep calling API until no more tool calls
-            while True:
-                response = call_api(messages, system_prompt)
-                content_blocks = response.get("content", [])
-                tool_results = []
-
-                for block in content_blocks:
-                    if block["type"] == "text":
-                        print(f"\n{CYAN}⏺{RESET} {render_markdown(block['text'])}")
-
-                    if block["type"] == "tool_use":
-                        tool_name = block["name"]
-                        tool_args = block["input"]
-                        arg_preview = str(list(tool_args.values())[0])[:50]
-                        print(
-                            f"\n{GREEN}⏺ {tool_name.capitalize()}{RESET}({DIM}{arg_preview}{RESET})"
-                        )
-
-                        result = run_tool(tool_name, tool_args)
-                        result_lines = result.split("\n")
-                        preview = result_lines[0][:60]
-                        if len(result_lines) > 1:
-                            preview += f" ... +{len(result_lines) - 1} lines"
-                        elif len(result_lines[0]) > 60:
-                            preview += "..."
-                        print(f"  {DIM}⎿  {preview}{RESET}")
-
-                        tool_results.append(
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": block["id"],
-                                "content": result,
-                            }
-                        )
-
-                messages.append({"role": "assistant", "content": content_blocks})
-
-                if not tool_results:
-                    break
-                messages.append({"role": "user", "content": tool_results})
-
+            agent_loop(messages, system_prompt)
             print()
-
-        except (KeyboardInterrupt, EOFError):
-            break
-        except Exception as err:
-            print(f"{RED}⏺ Error: {err}{RESET}")
+        except (KeyboardInterrupt, EOFError): break
+        except Exception as err: print(f"{RED}⏺ Error: {err}{RESET}")
 
 
 if __name__ == "__main__":
