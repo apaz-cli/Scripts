@@ -1,0 +1,30 @@
+#!/bin/sh
+
+if [ -d "$HOME/git/Dotfiles" ]; then
+  DOT_REPO="$HOME/git/Dotfiles"
+elif [ -d "$HOME/Dotfiles" ]; then
+  DOT_REPO="$HOME/Dotfiles"
+fi
+
+# Bash
+cp "$DOT_REPO/.bashrc" ~
+
+# Nano
+cp "$DOT_REPO/.nanorc" ~
+cp -r "$DOT_REPO/.nano" ~
+
+# Kitty
+KITTY_CONFIG_DIR="$HOME/.config/kitty"
+if [ -d "$KITTY_CONFIG_DIR" ]; then mkdir -p "$KITTY_CONFIG_DIR"; fi
+cp "$DOT_REPO/kitty.conf" "$KITTY_CONFIG_DIR"
+
+# Firefox
+if [ -d "$HOME/.mozilla/firefox" ]; then
+  FFPROFILE=$(ls -d $HOME/.mozilla/firefox/*.default-esr 2>/dev/null)
+  if [ $(echo "$FFPROFILE" | wc -l) -gt 1 ]; then
+    echo "Error: Multiple Firefox profiles found" >&2
+  else
+    mkdir "$FFPROFILE/chrome/"
+    cp "$DOT_REPO/userChrome.css" "$FFPROFILE/chrome/userChrome.css"
+  fi
+fi
