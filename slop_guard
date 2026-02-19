@@ -11,11 +11,15 @@ if [ ! -d "$VENV_DIR" ]; then
         -o "$VENV_DIR/slop_guard.py"
 fi
 
-# If run interactively, register as an MCP server and exit.
+# If run interactively, register if needed then launch Claude Code.
 if [ -t 0 ]; then
-    claude mcp add --scope project slop-guard -- "$SCRIPT_DIR/slop_guard"
-    echo "Registered slop-guard MCP server."
-    exit 0
+    if claude mcp get slop-guard &>/dev/null; then
+        exec claude "$@"
+    else
+        claude mcp add --scope project slop-guard -- "$SCRIPT_DIR/slop_guard"
+        echo "Registered slop-guard MCP server."
+        exec claude "$@"
+    fi
 fi
 
 exec "$VENV_DIR/bin/python" "$VENV_DIR/slop_guard.py" "$@"
