@@ -1,0 +1,8 @@
+#!/bin/sh
+
+TMP_FILE="$(mktemp)"
+
+screen -L -Logfile "$TMP_FILE" bash -c "$*"
+
+sed 's/033\[/\x1b[/g' "$TMP_FILE"
+rm -r "$TMP_FILE"
