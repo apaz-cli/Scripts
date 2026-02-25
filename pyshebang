@@ -1,0 +1,2 @@
+#!/bin/sh
+echo "#!/usr/bin/env python3"

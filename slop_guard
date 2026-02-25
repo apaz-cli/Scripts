@@ -2,13 +2,20 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="/tmp/slop_guard_venv"
+REPO_DIR="/tmp/slop-guard"
+VENV_DIR="/tmp/slop-guard-venv"
 
+# Clone or update repo
+if [ ! -d "$REPO_DIR/.git" ]; then
+    git clone --depth 1 https://github.com/eric-tramel/slop-guard "$REPO_DIR"
+else
+    git -C "$REPO_DIR" pull --ff-only --quiet
+fi
+
+# Create venv and install package (editable so git updates are reflected)
 if [ ! -d "$VENV_DIR" ]; then
     python3 -m venv "$VENV_DIR"
-    "$VENV_DIR/bin/pip" install mcp --quiet
-    curl -fsSL https://raw.githubusercontent.com/eric-tramel/slop-guard/refs/heads/main/slop_guard.py \
-        -o "$VENV_DIR/slop_guard.py"
+    "$VENV_DIR/bin/pip" install --quiet -e "$REPO_DIR"
 fi
 
 # If run interactively, register if needed then launch Claude Code.
@@ -22,4 +29,5 @@ if [ -t 0 ]; then
     fi
 fi
 
-exec "$VENV_DIR/bin/python" "$VENV_DIR/slop_guard.py" "$@"
+# Non-interactive: run as MCP server
+exec "$VENV_DIR/bin/slop-guard"
