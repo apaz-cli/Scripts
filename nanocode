@@ -10,6 +10,8 @@ parser = argparse.ArgumentParser(
     description="Minimal Claude Code alternative - an agentic coding assistant",
     formatter_class=argparse.RawDescriptionHelpFormatter,
     epilog="""
+Read-only by default. Use --write to enable write/edit/bash tools.
+
 presets:
   --deepseek          Use DeepSeek API (requires DEEPSEEK_API_KEY)
   --glm               Use local GLM server at 127.0.0.1:9878
@@ -36,6 +38,7 @@ preset.add_argument("--glm", action="store_true", help="use local GLM server")
 parser.add_argument("--model", "-m", help="model name to use")
 parser.add_argument("--base-url", dest="base_url", help="API base URL")
 parser.add_argument("--api-style", dest="api_style", choices=["openai", "anthropic"], help="API style")
+parser.add_argument("--write", "-w", action="store_true", help="enable write/edit/bash tools (read-only by default)")
 parser.add_argument("--dangerously-skip-permissions", action="store_true", help="skip confirmation prompts for bash commands")
 parser.add_argument("--planning", nargs=3, metavar=("TASK", "CTX", "OUT"), help=argparse.SUPPRESS)
 args = parser.parse_args()
@@ -166,6 +169,50 @@ def web_search(args):
     return "\n\n".join(lines)
 
 
+def _html_to_text(h):
+    """Convert HTML to readable plain text."""
+    h = re.sub(r'<(script|style|nav|footer|header)[^>]*>.*?</\1>', '', h, flags=re.DOTALL | re.IGNORECASE)
+    h = re.sub(r'<!--.*?-->', '', h, flags=re.DOTALL)
+    h = re.sub(r'<h[1-6][^>]*>(.*?)</h[1-6]>', r'\n\n\1\n\n', h, flags=re.IGNORECASE | re.DOTALL)
+    h = re.sub(r'<li[^>]*>', '\n- ', h, flags=re.IGNORECASE)
+    h = re.sub(r'<br\s*/?>', '\n', h, flags=re.IGNORECASE)
+    h = re.sub(r'<(p|div|tr)[^>]*>', '\n\n', h, flags=re.IGNORECASE)
+    h = re.sub(r'<a [^>]*href="([^"]*)"[^>]*>(.*?)</a>', r'\2 (\1)', h, flags=re.IGNORECASE | re.DOTALL)
+    h = re.sub(r'<[^>]+>', '', h)
+    h = html.unescape(h)
+    h = re.sub(r'\n{3,}', '\n\n', h)
+    return h.strip()
+
+
+def web_fetch(args):
+    url = args["url"]
+    if not url.startswith(("http://", "https://")):
+        return "error: URL must start with http:// or https://"
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (compatible; nanocode/1.0)",
+            "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8",
+        })
+        resp = urllib.request.urlopen(req, timeout=30)
+        content_type = resp.headers.get("Content-Type", "")
+        data = resp.read(5 * 1024 * 1024)  # 5MB max
+        text = data.decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        return f"error: HTTP {e.code}: {e.reason}"
+    except urllib.error.URLError as e:
+        return f"error: {e.reason}"
+    except TimeoutError:
+        return "error: request timed out"
+
+    if "html" in content_type:
+        text = _html_to_text(text)
+
+    # Truncate to reasonable size for context
+    if len(text) > 30000:
+        text = text[:30000] + "\n\n... (truncated)"
+    return text or "(empty response)"
+
+
 def bash(args):
     proc = subprocess.Popen(
         args["cmd"], shell=True,
@@ -198,16 +245,18 @@ def plan(a):
 
 TOOLS = {
     "read":       ("Read file with line numbers (file path, not directory)", {"path": "string", "offset": "number?", "limit": "number?"}, read, False),
-    "write":      ("Write content to file", {"path": "string", "content": "string"}, write, False),
-    "edit":       ("Replace old with new in file (old must be unique unless all=true)", {"path": "string", "old": "string", "new": "string", "all": "boolean?"}, edit, False),
     "glob":       ("Find files by pattern, sorted by mtime", {"pat": "string", "path": "string?"}, glob, False),
     "grep":       ("Search files for regex pattern", {"pat": "string", "path": "string?"}, grep, False),
-    "bash":       ("Run shell command", {"cmd": "string"}, bash, True),
     "web_search": ("Search the web via DuckDuckGo", {"query": "string"}, web_search, False),
+    "web_fetch":  ("Fetch a URL and return its content as text", {"url": "string"}, web_fetch, False),
     "plan":       ("Spawn a planning subagent to analyze a task and create a detailed plan", {"task": "string"}, plan, False),
 }
+if args.write:
+    TOOLS["write"] = ("Write content to file", {"path": "string", "content": "string"}, write, False)
+    TOOLS["edit"]  = ("Replace old with new in file (old must be unique unless all=true)", {"path": "string", "old": "string", "new": "string", "all": "boolean?"}, edit, False)
+    TOOLS["bash"]  = ("Run shell command", {"cmd": "string"}, bash, True)
 if args.planning:
-  del TOOLS["plan"]  # Prevent recurse
+    del TOOLS["plan"]  # Prevent recurse
 
 
 def run_tool(name, args):
@@ -317,7 +366,8 @@ def main():
         open(out_file, 'w').write(result)
         return
 
-    print(f"{BOLD}nanocode{RESET} | {DIM}{MODEL} | {os.getcwd()}{RESET}\n")
+    mode_label = "read/write" if args.write else "read-only"
+    print(f"{BOLD}nanocode{RESET} | {DIM}{MODEL} | {mode_label} | {os.getcwd()}{RESET}\n")
     histfile = "/tmp/.nanocode_history"
     try: readline.read_history_file(histfile)
     except FileNotFoundError: pass
