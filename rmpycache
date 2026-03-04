@@ -1,0 +1,3 @@
+#!/bin/sh
+
+find . -type d \( -name '__pycache__' -o -name '*.egg-info' \) -print -exec rm -rf {} +
