@@ -1,0 +1,19 @@
+#!/bin/sh
+
+if [ -z "$1" ]; then
+    echo "Usage: portkill <port>"
+    exit 1
+fi
+
+PORT="$1"
+PIDS="$(lsof -ti :"$PORT")"
+
+if [ -z "$PIDS" ]; then
+    echo "Nothing on port $PORT"
+    exit 0
+fi
+
+for PID in $PIDS; do
+    echo "Killing PID $PID on port $PORT"
+    kill "$PID"
+done
