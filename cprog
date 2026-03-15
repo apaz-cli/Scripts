@@ -71,7 +71,7 @@ int file_exists(const char *filename) {
 }
 
 int main(int argc, char *argv[]) {
-  char *temp_dir = NULL, *c_file = NULL, *cinclude_file = NULL, *output_file = NULL, *nano_cmd = NULL, *compile_cmd = NULL, *run_cmd = NULL;
+  char *temp_dir = NULL, *c_file = NULL, *cinclude_file = NULL, *output_file = NULL, *nano_cmd = NULL, *compile_cmd = NULL;
   FILE *cinclude_fp = NULL;
 
   if (argc > 1) {
