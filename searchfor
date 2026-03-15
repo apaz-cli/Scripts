@@ -1,0 +1,477 @@
+#if 0
+TMP="$(mktemp -d)"
+cc -O3 -march=native -pthread -x c -o "$TMP/a.out" "$0" && "$TMP/a.out" "$@"
+RVAL=$?; rm -rf "$TMP"; exit $RVAL
+#endif
+
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#include <dirent.h>
+#include <pthread.h>
+#include <regex.h>
+#include <errno.h>
+
+/* ── linux_dirent64 (for raw getdents64) ─────────────────────────────────── */
+struct linux_dirent64 {
+    uint64_t d_ino;
+    int64_t  d_off;
+    uint16_t d_reclen;
+    uint8_t  d_type;
+    char     d_name[];
+};
+
+/* ── Work queue (circular buffer) ────────────────────────────────────────── */
+#define QUEUE_CAP 4096
+
+typedef struct {
+    char           *paths[QUEUE_CAP];
+    int             head, tail, count;
+    int             done;
+    pthread_mutex_t mu;
+    pthread_cond_t  not_empty;
+    pthread_cond_t  not_full;
+} WorkQueue;
+
+static void queue_init(WorkQueue *q) {
+    q->head = q->tail = q->count = q->done = 0;
+    pthread_mutex_init(&q->mu, NULL);
+    pthread_cond_init(&q->not_empty, NULL);
+    pthread_cond_init(&q->not_full, NULL);
+}
+
+static void queue_push(WorkQueue *q, char *path) {
+    pthread_mutex_lock(&q->mu);
+    while (q->count == QUEUE_CAP)
+        pthread_cond_wait(&q->not_full, &q->mu);
+    q->paths[q->tail] = path;
+    q->tail = (q->tail + 1) % QUEUE_CAP;
+    q->count++;
+    pthread_cond_signal(&q->not_empty);
+    pthread_mutex_unlock(&q->mu);
+}
+
+/* Returns NULL when done and queue is empty */
+static char *queue_pop(WorkQueue *q) {
+    pthread_mutex_lock(&q->mu);
+    while (q->count == 0 && !q->done)
+        pthread_cond_wait(&q->not_empty, &q->mu);
+    if (q->count == 0) {
+        pthread_mutex_unlock(&q->mu);
+        return NULL;
+    }
+    char *p = q->paths[q->head];
+    q->head = (q->head + 1) % QUEUE_CAP;
+    q->count--;
+    pthread_cond_signal(&q->not_full);
+    pthread_mutex_unlock(&q->mu);
+    return p;
+}
+
+static void queue_set_done(WorkQueue *q) {
+    pthread_mutex_lock(&q->mu);
+    q->done = 1;
+    pthread_cond_broadcast(&q->not_empty);
+    pthread_mutex_unlock(&q->mu);
+}
+
+/* ── Results (dynamic array) ─────────────────────────────────────────────── */
+typedef struct {
+    char          **paths;
+    int             count, cap;
+    pthread_mutex_t mu;
+} Results;
+
+static void results_init(Results *r) {
+    r->cap   = 256;
+    r->count = 0;
+    r->paths = malloc(r->cap * sizeof(char *));
+    pthread_mutex_init(&r->mu, NULL);
+}
+
+static void results_append(Results *r, const char *path) {
+    pthread_mutex_lock(&r->mu);
+    if (r->count == r->cap) {
+        r->cap *= 2;
+        r->paths = realloc(r->paths, r->cap * sizeof(char *));
+    }
+    r->paths[r->count++] = strdup(path);
+    pthread_mutex_unlock(&r->mu);
+}
+
+/* ── Worker context ──────────────────────────────────────────────────────── */
+typedef struct {
+    regex_t    *patterns;
+    int         n_patterns;
+    WorkQueue  *queue;
+    Results    *results;
+} WorkerCtx;
+
+/* ── Skip sets ───────────────────────────────────────────────────────────── */
+static const char *SKIP_DIRS[] = {
+    ".git", "__pycache__", "node_modules", ".venv", NULL
+};
+static const char *SKIP_EXTS[] = {
+    ".pyc", ".so", ".dll", ".exe", ".zip", ".tar", ".gz",
+    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp",
+    ".o", ".a", ".dylib", ".deb", ".webm", ".mkv", ".mp4", ".mp3", ".mov", NULL
+};
+
+static int skip_dir(const char *name) {
+    for (int i = 0; SKIP_DIRS[i]; i++)
+        if (strcmp(name, SKIP_DIRS[i]) == 0) return 1;
+    return 0;
+}
+
+static int skip_ext(const char *name) {
+    const char *dot = strrchr(name, '.');
+    if (!dot) return 0;
+    for (int i = 0; SKIP_EXTS[i]; i++)
+        if (strcmp(dot, SKIP_EXTS[i]) == 0) return 1;
+    return 0;
+}
+
+/* ── Directory traversal ─────────────────────────────────────────────────── */
+#define GETDENTS_BUF (1 << 20)  /* 1 MB */
+
+/*
+ * walk() — single-threaded producer that pushes file paths onto the queue.
+ *
+ * path_buf / path_len / path_cap: reusable path accumulator.
+ *   path_buf[0..path_len-1] is the current directory prefix (no trailing slash).
+ *   On entry to a subdir we append "/name"; on return we restore path_len.
+ *   This eliminates one malloc per subdirectory level.
+ *
+ * dents_buf: 1 MB getdents buffer allocated once in main and reused at every
+ *   recursion level.  This works because we finish ALL getdents calls for a
+ *   directory before recursing, so the buffer is idle during recursion.
+ */
+static void walk(int parent_fd, const char *entry_name,
+                 char **path_buf, size_t *path_len, size_t *path_cap,
+                 char *dents_buf, WorkQueue *queue) {
+
+    int dirfd = openat(parent_fd, entry_name,
+                       O_RDONLY | O_DIRECTORY | O_NOATIME | O_CLOEXEC);
+    if (dirfd < 0 && errno == EPERM)
+        dirfd = openat(parent_fd, entry_name,
+                       O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dirfd < 0) return;
+
+    /* Collect subdir names while consuming dents_buf; recurse after. */
+    char **subdirs    = NULL;
+    int    n_subdirs  = 0;
+    int    cap_subdirs = 0;
+
+    long nread;
+    while ((nread = syscall(SYS_getdents64, dirfd, dents_buf, GETDENTS_BUF)) > 0) {
+        for (long off = 0; off < nread; ) {
+            struct linux_dirent64 *d = (struct linux_dirent64 *)(dents_buf + off);
+            off += d->d_reclen;
+
+            const char *name = d->d_name;
+            if (name[0] == '.' &&
+                (name[1] == '\0' || (name[1] == '.' && name[2] == '\0')))
+                continue;
+
+            uint8_t type = d->d_type;
+
+            /* Resolve unknown type via fstatat */
+            if (type == DT_UNKNOWN) {
+                struct stat st;
+                if (fstatat(dirfd, name, &st, AT_SYMLINK_NOFOLLOW) == 0) {
+                    if      (S_ISDIR(st.st_mode)) type = DT_DIR;
+                    else if (S_ISREG(st.st_mode)) type = DT_REG;
+                }
+            }
+
+            size_t nlen = strlen(name);
+
+            if (type == DT_DIR) {
+                if (skip_dir(name)) continue;
+                if (n_subdirs == cap_subdirs) {
+                    cap_subdirs = cap_subdirs ? cap_subdirs * 2 : 8;
+                    subdirs = realloc(subdirs, cap_subdirs * sizeof(char *));
+                }
+                subdirs[n_subdirs++] = strndup(name, nlen);
+
+            } else if (type == DT_REG) {
+                if (skip_ext(name)) continue;
+                /* Build full path by appending name past the current prefix */
+                size_t slash    = (*path_len > 0) ? 1 : 0;
+                size_t full_len = *path_len + slash + nlen;
+                char  *fpath    = malloc(full_len + 1);
+                if (*path_len > 0) {
+                    memcpy(fpath, *path_buf, *path_len);
+                    fpath[*path_len] = '/';
+                }
+                memcpy(fpath + *path_len + slash, name, nlen + 1);
+                queue_push(queue, fpath);
+            }
+            /* DT_LNK and others: skip (matches Python os.walk default) */
+        }
+    }
+    /* dents_buf is now idle — safe for recursive calls to reuse */
+
+    for (int i = 0; i < n_subdirs; i++) {
+        size_t nlen      = strlen(subdirs[i]);
+        size_t slash     = (*path_len > 0) ? 1 : 0;
+        size_t new_len   = *path_len + slash + nlen;
+        size_t saved_len = *path_len;
+
+        /* Grow path accumulator if needed */
+        if (new_len + 1 > *path_cap) {
+            *path_cap = (new_len + 1) * 2;
+            *path_buf = realloc(*path_buf, *path_cap);
+        }
+        /* Append /subdir to path accumulator */
+        if (slash) (*path_buf)[*path_len] = '/';
+        memcpy(*path_buf + *path_len + slash, subdirs[i], nlen + 1);
+        *path_len = new_len;
+
+        walk(dirfd, subdirs[i], path_buf, path_len, path_cap, dents_buf, queue);
+
+        /* Restore path accumulator */
+        *path_len = saved_len;
+        (*path_buf)[saved_len] = '\0';
+
+        free(subdirs[i]);
+    }
+    free(subdirs);
+    close(dirfd);  /* kept open so inner openat(dirfd, name) calls work */
+}
+
+/* ── Worker thread ───────────────────────────────────────────────────────── */
+static void *worker(void *arg) {
+    WorkerCtx *ctx = arg;
+    uint64_t all_mask = (ctx->n_patterns < 64)
+                        ? ((uint64_t)1 << ctx->n_patterns) - 1
+                        : UINT64_MAX;
+
+    char *path;
+    while ((path = queue_pop(ctx->queue)) != NULL) {
+        int fd = open(path, O_RDONLY | O_NOATIME | O_CLOEXEC);
+        if (fd < 0 && errno == EPERM)
+            fd = open(path, O_RDONLY | O_CLOEXEC);
+        if (fd < 0) { free(path); continue; }
+
+        struct stat st;
+        if (fstat(fd, &st) != 0 || st.st_size == 0) {
+            close(fd); free(path); continue;
+        }
+
+        /* mmap without MAP_POPULATE: kernel pipelines readahead while regexec
+         * runs, and early matches skip the tail entirely.  MADV_SEQUENTIAL
+         * explicitly enables that readahead at the cost of one syscall. */
+        void *ptr = mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+        close(fd);
+        if (ptr == MAP_FAILED) { free(path); continue; }
+        madvise(ptr, (size_t)st.st_size, MADV_SEQUENTIAL);
+
+        uint64_t found = 0;
+        for (int i = 0; i < ctx->n_patterns; i++) {
+            if (found & ((uint64_t)1 << i)) continue;
+            regmatch_t rm = { .rm_so = 0, .rm_eo = (regoff_t)st.st_size };
+            if (regexec(&ctx->patterns[i], ptr, 0, &rm, REG_STARTEND) == 0) {
+                found |= (uint64_t)1 << i;
+                if (found == all_mask) break;
+            }
+        }
+
+        munmap(ptr, (size_t)st.st_size);
+
+        if (found == all_mask)
+            results_append(ctx->results, path);
+
+        free(path);
+    }
+    return NULL;
+}
+
+/* ── Comparator for qsort ────────────────────────────────────────────────── */
+static int cmp_str(const void *a, const void *b) {
+    return strcmp(*(const char **)a, *(const char **)b);
+}
+
+/* ── main ────────────────────────────────────────────────────────────────── */
+int main(int argc, char **argv) {
+    if (argc < 2) {
+        fprintf(stderr, "usage: searchfor [-i] PATTERN [PATTERN...] [DIR]\n");
+        return 1;
+    }
+
+    int ignore_case = 0;
+    int absolute     = 0;
+    int argi = 1;
+
+    /* Parse flags */
+    while (argi < argc && argv[argi][0] == '-' && argv[argi][1] != '\0') {
+        if (strcmp(argv[argi], "-i") == 0 || strcmp(argv[argi], "--ignore-case") == 0) {
+            ignore_case = 1;
+            argi++;
+        } else if (strcmp(argv[argi], "-a") == 0 || strcmp(argv[argi], "--absolute") == 0) {
+            absolute = 1;
+            argi++;
+        } else if (strcmp(argv[argi], "--") == 0) {
+            argi++;
+            break;
+        } else if (strcmp(argv[argi], "-h") == 0 || strcmp(argv[argi], "--help") == 0) {
+            puts("usage: searchfor [-h] [-i] [-a] PATTERN [PATTERN ...] [DIR]\n"
+                 "\n"
+                 "Search files for one or more regex patterns (all must match).\n"
+                 "\n"
+                 "positional arguments:\n"
+                 "  PATTERN    regex pattern(s) to search for (all must be present in the file)\n"
+                 "  DIR        directory to search (default: current directory)\n"
+                 "\n"
+                 "options:\n"
+                 "  -h, --help         show this help message and exit\n"
+                 "  -i, --ignore-case  case-insensitive matching\n"
+                 "  -a, --absolute     print absolute paths\n"
+                 "\n"
+                 "Files containing ALL patterns are printed to stdout.\n"
+                 "Exits 0 if any found, 1 otherwise.");
+            return 0;
+        } else {
+            fprintf(stderr, "searchfor: unknown flag: %s\n", argv[argi]);
+            return 1;
+        }
+    }
+
+    if (argi >= argc) {
+        fprintf(stderr, "usage: searchfor [-i] PATTERN [PATTERN...] [DIR]\n");
+        return 1;
+    }
+
+    /* Collect remaining args; last one is DIR if it's an existing directory */
+    int remaining = argc - argi;
+    const char *dir = ".";
+    int n_patterns = remaining;
+
+    if (remaining >= 2) {
+        struct stat st;
+        const char *last = argv[argc - 1];
+        if (stat(last, &st) == 0 && S_ISDIR(st.st_mode)) {
+            dir = last;
+            n_patterns = remaining - 1;
+        }
+    }
+
+    if (n_patterns < 1) {
+        fprintf(stderr, "searchfor: need at least one pattern\n");
+        return 1;
+    }
+
+    /* Compile regex patterns */
+    regex_t *patterns = malloc(n_patterns * sizeof(regex_t));
+    int cflags = REG_EXTENDED | REG_NOSUB | (ignore_case ? REG_ICASE : 0);
+    for (int i = 0; i < n_patterns; i++) {
+        int err = regcomp(&patterns[i], argv[argi + i], cflags);
+        if (err != 0) {
+            char errbuf[256];
+            regerror(err, &patterns[i], errbuf, sizeof(errbuf));
+            fprintf(stderr, "searchfor: bad pattern '%s': %s\n",
+                    argv[argi + i], errbuf);
+            return 1;
+        }
+    }
+
+    /* Determine thread count */
+    long nproc = sysconf(_SC_NPROCESSORS_ONLN);
+    if (nproc < 1)  nproc = 1;
+    if (nproc > 20) nproc = 20;
+
+    /* Init shared structures */
+    WorkQueue queue;
+    queue_init(&queue);
+
+    Results results;
+    results_init(&results);
+
+    /* Spawn workers */
+    WorkerCtx ctx = {
+        .patterns   = patterns,
+        .n_patterns = n_patterns,
+        .queue      = &queue,
+        .results    = &results,
+    };
+    pthread_t *threads = malloc(nproc * sizeof(pthread_t));
+    for (long i = 0; i < nproc; i++)
+        pthread_create(&threads[i], NULL, worker, &ctx);
+
+    /* Set up reusable path accumulator and getdents buffer */
+    size_t path_cap = 4096;
+    char  *path_buf = malloc(path_cap);
+    const char *prefix = (strcmp(dir, ".") == 0) ? "" : dir;
+    size_t path_len = strlen(prefix);
+    if (path_len + 1 > path_cap) {
+        path_cap = path_len + 1;
+        path_buf = realloc(path_buf, path_cap);
+    }
+    memcpy(path_buf, prefix, path_len + 1);
+
+    char *dents_buf = malloc(GETDENTS_BUF);
+
+    walk(AT_FDCWD, dir, &path_buf, &path_len, &path_cap, dents_buf, &queue);
+    queue_set_done(&queue);
+
+    free(dents_buf);
+    free(path_buf);
+
+    /* Wait for workers */
+    for (long i = 0; i < nproc; i++)
+        pthread_join(threads[i], NULL);
+    free(threads);
+
+    /* Cleanup patterns */
+    for (int i = 0; i < n_patterns; i++)
+        regfree(&patterns[i]);
+    free(patterns);
+
+    if (results.count == 0) return 1;
+
+    /* Sort results */
+    qsort(results.paths, results.count, sizeof(char *), cmp_str);
+
+    /* Optional: resolve to absolute paths by prepending cwd */
+    size_t cwd_len = 0;
+    char   cwd[4096];
+    if (absolute && getcwd(cwd, sizeof(cwd))) {
+        cwd_len = strlen(cwd);
+        cwd[cwd_len] = '/';  /* pre-place separator */
+    }
+
+    /* Compute lengths in one pass, then copy into a single output buffer */
+    size_t *lens = malloc(results.count * sizeof(size_t));
+    size_t total = 0;
+    for (int i = 0; i < results.count; i++) {
+        lens[i] = strlen(results.paths[i]);
+        total  += (cwd_len ? cwd_len + 1 : 0) + lens[i] + 1;  /* +1 for '\n' */
+    }
+
+    char  *out = malloc(total);
+    size_t pos = 0;
+    for (int i = 0; i < results.count; i++) {
+        if (cwd_len) {
+            memcpy(out + pos, cwd, cwd_len + 1);  /* includes the '/' */
+            pos += cwd_len + 1;
+        }
+        memcpy(out + pos, results.paths[i], lens[i]);
+        out[pos + lens[i]] = '\n';
+        pos += lens[i] + 1;
+        free(results.paths[i]);
+    }
+    free(lens);
+    free(results.paths);
+
+    write(STDOUT_FILENO, out, total);
+    free(out);
+
+    return 0;
+}
