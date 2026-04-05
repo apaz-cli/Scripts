@@ -121,7 +121,7 @@ static const char *SKIP_DIRS[] = {
 static const char *SKIP_EXTS[] = {
     ".pyc", ".so", ".dll", ".exe", ".zip", ".tar", ".gz",
     ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp",
-    ".o", ".a", ".dylib", ".deb", ".webm", ".mkv", ".mp4", ".mp3", ".mov", NULL
+    ".o", ".a", ".dylib", ".deb", ".webm", ".mkv", ".mp4", ".mp3", ".mov", ".elf", ".flac", NULL
 };
 
 static int skip_dir(const char *name) {
