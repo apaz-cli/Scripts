@@ -5,16 +5,29 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="/tmp/slop-guard"
 VENV_DIR="/tmp/slop-guard-venv"
 
-# Clone or update repo
+# Clone or update repo; reclone if repo is corrupt
 if [ ! -d "$REPO_DIR/.git" ]; then
     git clone --depth 1 https://github.com/eric-tramel/slop-guard "$REPO_DIR"
+    REPO_UPDATED=1
 else
-    git -C "$REPO_DIR" pull --ff-only --quiet
+    BEFORE=$(git -C "$REPO_DIR" rev-parse HEAD)
+    if ! git -C "$REPO_DIR" fetch --quiet origin \
+        || ! git -C "$REPO_DIR" restore . --quiet 2>/dev/null \
+        || ! git -C "$REPO_DIR" reset --hard origin/main --quiet; then
+        rm -rf "$REPO_DIR" "$VENV_DIR"
+        git clone --depth 1 https://github.com/eric-tramel/slop-guard "$REPO_DIR"
+        REPO_UPDATED=1
+    else
+        AFTER=$(git -C "$REPO_DIR" rev-parse HEAD)
+        [ "$BEFORE" != "$AFTER" ] && REPO_UPDATED=1 || REPO_UPDATED=0
+    fi
 fi
 
-# Create venv and install package (editable so git updates are reflected)
+# Create venv and install package; reinstall if repo was updated
 if [ ! -d "$VENV_DIR" ]; then
     python3 -m venv "$VENV_DIR"
+    "$VENV_DIR/bin/pip" install --quiet -e "$REPO_DIR"
+elif [ "${REPO_UPDATED:-0}" = "1" ]; then
     "$VENV_DIR/bin/pip" install --quiet -e "$REPO_DIR"
 fi
 

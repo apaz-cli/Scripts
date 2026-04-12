@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_URL="https://github.com/openclaw/openclaw.git"
+REPO_DIR="$HOME/git/openclaw"
+ANDROID_DIR="$REPO_DIR/apps/android"
+SDK_DIR="/tmp/android-sdk"
+CMDLINE_TOOLS_URL="https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip"
+SDKMANAGER="$SDK_DIR/cmdline-tools/latest/bin/sdkmanager"
+MODE="release"
+KEYSTORE="$HOME/.android/openclaw-release.jks"
+KEY_ALIAS="openclaw"
+STORE_PASSWORD="openclaw-local"
+KEY_PASSWORD="openclaw-local"
+GRADLE_PROPS="$HOME/.gradle/gradle.properties"
+
+usage() {
+  cat <<'EOF'
+Usage: build_openclaw_android_app [--release|--debug]
+
+  --release   Build a signed release AAB (default).
+  --debug     Build a debug APK instead.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --release) MODE="release" ;;
+    --debug)   MODE="debug" ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown argument: $1"; usage; exit 1 ;;
+  esac
+  shift
+done
+
+# --- Repo: clone or update ---
+if [ -d "$REPO_DIR/.git" ]; then
+  echo "==> Updating repo at $REPO_DIR"
+  git -C "$REPO_DIR" pull --rebase
+else
+  echo "==> Cloning repo into $REPO_DIR"
+  mkdir -p "$(dirname "$REPO_DIR")"
+  git clone "$REPO_URL" "$REPO_DIR"
+fi
+
+# --- Android SDK: install cmdline-tools if missing ---
+if [ ! -x "$SDKMANAGER" ]; then
+  echo "==> Installing Android command-line tools into $SDK_DIR"
+  mkdir -p "$SDK_DIR/cmdline-tools"
+  TMP_ZIP="$(mktemp /tmp/cmdline-tools-XXXXXX.zip)"
+  curl -fsSL "$CMDLINE_TOOLS_URL" -o "$TMP_ZIP"
+  unzip -q "$TMP_ZIP" -d "$SDK_DIR/cmdline-tools"
+  # sdkmanager expects the tools at cmdline-tools/latest/
+  mv "$SDK_DIR/cmdline-tools/cmdline-tools" "$SDK_DIR/cmdline-tools/latest"
+  rm "$TMP_ZIP"
+fi
+
+export ANDROID_HOME="$SDK_DIR"
+
+# --- Accept licenses ---
+echo "==> Accepting SDK licenses"
+yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+
+# --- Install required SDK components if missing ---
+COMPONENTS_NEEDED=()
+[ ! -d "$SDK_DIR/platform-tools" ]          && COMPONENTS_NEEDED+=("platform-tools")
+[ ! -d "$SDK_DIR/platforms/android-36" ]    && COMPONENTS_NEEDED+=("platforms;android-36")
+[ ! -d "$SDK_DIR/build-tools/35.0.0" ]      && COMPONENTS_NEEDED+=("build-tools;35.0.0")
+
+if [ ${#COMPONENTS_NEEDED[@]} -gt 0 ]; then
+  echo "==> Installing SDK components: ${COMPONENTS_NEEDED[*]}"
+  "$SDKMANAGER" "${COMPONENTS_NEEDED[@]}"
+else
+  echo "==> SDK components already installed"
+fi
+
+# --- Point Gradle at the SDK ---
+echo "sdk.dir=$SDK_DIR" > "$ANDROID_DIR/local.properties"
+
+# --- Release signing setup ---
+if [ "$MODE" = "release" ]; then
+  if [ ! -f "$KEYSTORE" ]; then
+    echo "==> Generating release keystore at $KEYSTORE"
+    mkdir -p "$(dirname "$KEYSTORE")"
+    keytool -genkeypair -v \
+      -keystore "$KEYSTORE" \
+      -alias "$KEY_ALIAS" \
+      -keyalg RSA -keysize 2048 -validity 10000 \
+      -storepass "$STORE_PASSWORD" \
+      -keypass "$KEY_PASSWORD" \
+      -dname "CN=openclaw, O=personal"
+  fi
+
+  # Write signing props to gradle.properties (create or update each key)
+  mkdir -p "$(dirname "$GRADLE_PROPS")"
+  touch "$GRADLE_PROPS"
+  for KEY_VAL in \
+    "OPENCLAW_ANDROID_STORE_FILE=$KEYSTORE" \
+    "OPENCLAW_ANDROID_STORE_PASSWORD=$STORE_PASSWORD" \
+    "OPENCLAW_ANDROID_KEY_ALIAS=$KEY_ALIAS" \
+    "OPENCLAW_ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
+  do
+    KEY="${KEY_VAL%%=*}"
+    if grep -q "^$KEY=" "$GRADLE_PROPS" 2>/dev/null; then
+      sed -i "s|^$KEY=.*|$KEY_VAL|" "$GRADLE_PROPS"
+    else
+      echo "$KEY_VAL" >> "$GRADLE_PROPS"
+    fi
+  done
+fi
+
+# --- Build ---
+cd "$ANDROID_DIR"
+# Stop any running daemon that may have a stale SDK path cached
+./gradlew --stop > /dev/null 2>&1 || true
+
+if [ "$MODE" = "release" ]; then
+  echo "==> Building signed release APK"
+  ./gradlew :app:assembleRelease
+  APK="$ANDROID_DIR/app/build/outputs/apk/release/app-release.apk"
+  echo ""
+  echo "Build complete."
+  echo "APK: $APK"
+else
+  echo "==> Building debug APK"
+  ./gradlew :app:assembleDebug
+  APK="$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk"
+  echo ""
+  echo "Build complete."
+  echo "APK: $APK"
+fi
