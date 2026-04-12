@@ -1,2 +1,46 @@
-#!/bin/sh
-nvim "$@"
+#!/bin/bash
+
+set -e
+
+# Locked neovim version — change to e.g. "v0.10.4" to hard-pin a release.
+# "stable" resolves to whatever GitHub's stable tag points at.
+NVIM_VERSION="stable"
+
+INSTALL_DIR="/tmp/nv-neovim-${NVIM_VERSION}"
+NVIM_BIN="${INSTALL_DIR}/bin/nvim"
+
+# ---------------------------------------------------------------------------
+# Download and extract the pre-built release tarball if not already cached
+# ---------------------------------------------------------------------------
+if [ ! -x "$NVIM_BIN" ]; then
+    echo "[nv] Downloading neovim (${NVIM_VERSION})..." >&2
+    rm -rf "$INSTALL_DIR"
+    mkdir -p "$INSTALL_DIR"
+
+    ARCH="$(uname -m)"   # x86_64 or aarch64
+    URL="https://github.com/neovim/neovim/releases/download/${NVIM_VERSION}/nvim-linux-${ARCH}.tar.gz"
+
+    curl -fsSL "$URL" | tar -xz -C "$INSTALL_DIR" --strip-components=1
+    echo "[nv] Done." >&2
+fi
+
+# ---------------------------------------------------------------------------
+# Dotfiles
+# TODO: Wire up dotfiles once they are found/recovered.
+#
+# The old nviminstall script referenced:
+#   https://github.com/apaz-cli/nvim-config
+# but that repo may be gone or stale — verify before using it.
+#
+# Once the dotfiles repo is known, do something like:
+#
+#   DOTFILES_DIR="/tmp/nv-dotfiles"
+#   if [ ! -d "$DOTFILES_DIR/.git" ]; then
+#       git clone --depth=1 <dotfiles-url> "$DOTFILES_DIR"
+#   fi
+#   export XDG_CONFIG_HOME="$DOTFILES_DIR"
+#   # (The repo should contain an nvim/ subdirectory at its root,
+#   #  which becomes $XDG_CONFIG_HOME/nvim — neovim's config dir.)
+# ---------------------------------------------------------------------------
+
+exec "$NVIM_BIN" "$@"
