@@ -13,6 +13,11 @@ from shlex import split
 def run(s):
   subprocess.run(split(s), check=True)
 
+def pandoc_self_contained_flag():
+  out = subprocess.run(['pandoc', '--version'], check=True, capture_output=True, text=True).stdout
+  major, minor = (int(x) for x in re.match(r'pandoc(?:\.exe)? (\d+)\.(\d+)', out).groups())
+  return '--embed-resources --standalone' if (major, minor) >= (2, 19) else '--self-contained'
+
 blog_mode = '--blog' in sys.argv
 args = [a for a in sys.argv[1:] if a != '--blog']
 
@@ -44,7 +49,7 @@ if blog_mode:
   tmp.close()
 
   display_title = os.path.splitext(os.path.basename(_from))[0].replace("_", " ")
-  run(f'pandoc -s --embed-resources --standalone --metadata pagetitle="{display_title}" -f markdown-smart -H {tmp.name} {_from} -o {_to}')
+  run(f'pandoc -s {pandoc_self_contained_flag()} --metadata pagetitle="{display_title}" -f markdown-smart -H {tmp.name} {_from} -o {_to}')
   os.unlink(tmp.name)
 
   # Post-process: fix .sourceCode style (same as generate.py)
@@ -78,7 +83,7 @@ body {
   with open("pandoc.css", "w+") as f:
     f.write(css)
 
-  run(f'pandoc -s --embed-resources --standalone --toc --metadata pagetitle="{_title}" -H pandoc.css -fmarkdown -thtml {_from} -o {_to}')
+  run(f'pandoc -s {pandoc_self_contained_flag()} --toc --metadata pagetitle="{_title}" -H pandoc.css -fmarkdown -thtml {_from} -o {_to}')
 
   run('rm pandoc.css')
 
