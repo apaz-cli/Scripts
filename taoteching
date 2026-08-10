@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # The Tao Te Ching (Lao-tzu, tr. S. Mitchell), pre-formatted and resumable.
 #
 # Quitting with q, Q or ZZ saves the line you were on; the next run picks up
@@ -8,15 +8,17 @@
 #
 #   taoteching            resume where you left off
 #   taoteching --reset    start over from chapter 1
-set -euo pipefail
+#
+# POSIX sh, so `curl -sSL <url> | sh` works too.
+set -eu
 
-state_dir=/tmp/taoteching_state
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/taoteching"
 mkdir -p "$state_dir"
 text="$state_dir/text"
 keys="$state_dir/lesskey"
 export TAO_STATE="$state_dir/pos"
 
-[[ ${1-} == --reset ]] && rm -f "$TAO_STATE"
+if [ "${1-}" = --reset ]; then rm -f "$TAO_STATE"; fi
 
 cat > "$keys" <<'KEYEOF'
 #command
@@ -29,7 +31,7 @@ KEYEOF
 export LESSEDIT='echo %lt > $TAO_STATE 2>/dev/null'
 
 line=$(cat "$TAO_STATE" 2>/dev/null || true)
-[[ $line =~ ^[0-9]+$ ]] || line=1
+case $line in '' | *[!0-9]*) line=1 ;; esac
 
 cat > "$text" <<'TAOEOF'
 
