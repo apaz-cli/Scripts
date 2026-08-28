@@ -1,0 +1,17 @@
+#!/bin/sh
+# Fire `claude hi` off into the background under nohup and let timeout(1) tear
+# it down after two seconds.  Output is discarded.
+#
+# `claude` isatty()-checks its fds and falls back to non-interactive print mode
+# when they are pipes, so script(1) allocates a pty and hands it a real terminal
+# on fd 0/1/2.  timeout's TERM goes to script, which tears down the pty and
+# SIGHUPs claude with it.
+#
+# The pty inherits its size from script's stdin, which is /dev/null here, so it
+# would come up 0x0 and the TUI would have nothing to lay out on.  stty runs
+# inside the pty and fixes that before claude starts.
+
+nohup timeout -k 1 2 \
+    env -u CI TERM="${TERM:-xterm-256color}" \
+    script -qfec "stty rows 50 cols 200; claude hi" /dev/null \
+    >/dev/null 2>&1 </dev/null &

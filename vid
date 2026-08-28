@@ -8,4 +8,4 @@ if [ $# -ne 1 ]; then
     exit 1
 fi
 
-mpv --no-config --vo=tct "$1"
+mpv --no-config --really-quiet --vo=tct "$1"

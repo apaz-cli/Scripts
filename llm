@@ -1,0 +1,2151 @@
+#!/usr/bin/env bash
+# =============================================================================
+# llm-tui.sh — A terminal UI for interacting with LLM APIs
+# =============================================================================
+set -euo pipefail
+
+# Add local bin directories to PATH (for static jq etc.)
+for local_bin in "$HOME/.local/bin" "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)/.local/bin"; do
+    if [[ -d "$local_bin" ]]; then
+        export PATH="$local_bin:$PATH"
+    fi
+done
+
+# -----------------------------------------------------------------------------
+# Configuration (hardcoded defaults)
+# -----------------------------------------------------------------------------
+_API_BASE_DEFAULT="https://api.deepseek.com"
+API_KEY="${LLM_DEEPSEEK_API_KEY:-}"
+API_BASE="${API_BASE:-$_API_BASE_DEFAULT}"
+MODEL="${MODEL:-deepseek-v4-pro}"
+
+# XDG base directories (fall back to ~/.local/share and ~/.config)
+XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+
+CHAT_DIR="${CHAT_DIR:-$XDG_DATA_HOME/llm-tui/chats}"
+CONFIG_DIR="${CONFIG_DIR:-$XDG_CONFIG_HOME/llm-tui}"
+CONFIG_FILE="${CONFIG_FILE:-$CONFIG_DIR/config}"
+
+# Runtime globals
+EDITOR_CMD=""
+CLIP_CMD=""
+default_thinking="true"
+default_model="$MODEL"
+_MAX_THINKING_SYSTEM_PROMPT='Reasoning Effort: Absolute maximum with no shortcuts permitted.
+You MUST be very thorough in your thinking and comprehensively decompose the problem to resolve the root cause, rigorously stress-testing your logic against all potential paths, edge cases, and adversarial scenarios.
+Explicitly write out your entire deliberation process, documenting every intermediate step, considered alternative, and rejected hypothesis to ensure absolutely no assumption is left unchecked.'
+_LLM_RESULT=""
+_RESIZE_FLAG=false
+show_thinking="true"
+
+# -----------------------------------------------------------------------------
+# Tool Registry — define one _tool_<name> function per tool; auto-discovered
+# -----------------------------------------------------------------------------
+_tool_read_file() { jq -n --arg cwd "$PWD" '{type:"function",function:{name:"read_file",description:"Read a file from the local filesystem",parameters:{type:"object",properties:{filePath:{type:"string",description:("Absolute path to the file. cwd: " + $cwd)},offset:{type:"integer",description:"Line number to start from (1-indexed)"},limit:{type:"integer",description:"Max lines to read (default 2000)"}},required:["filePath"]}}}'; }
+_tool_grep()     { jq -n '{type:"function",function:{name:"grep",description:"Search file contents by regex pattern",parameters:{type:"object",properties:{pattern:{type:"string",description:"Regex pattern to search for"},path:{type:"string",description:"Directory path to search in (defaults to current dir)"},include:{type:"string",description:"File pattern filter, e.g. \"*.sh\""}},required:["pattern"]}}}'; }
+_tool_glob()     { jq -n '{type:"function",function:{name:"glob",description:"Find files matching a glob pattern",parameters:{type:"object",properties:{pattern:{type:"string",description:"Glob pattern, e.g. \"src/**/*.ts\""},path:{type:"string",description:"Directory to search in"}},required:["pattern"]}}}'; }
+
+list_tool_names() {
+    declare -F | grep -oP '\b_tool_\K(?!exec)\w+' | sort
+}
+
+tool_description() {
+    local fn="_tool_${1}"
+    declare -F "$fn" &>/dev/null || { echo "Unknown tool"; return 1; }
+    "$fn" | jq -r '.function.description'
+}
+
+tool_schema() {
+    local fn="_tool_${1}"
+    declare -F "$fn" &>/dev/null || return 1
+    "$fn"
+}
+
+build_active_tools_json() {
+    local first=true
+    printf '['
+    for name in "$@"; do
+        local schema
+        schema=$(tool_schema "$name" 2>/dev/null) || continue
+        [[ "$first" != true ]] && printf ','
+        first=false
+        printf '%s' "$schema"
+    done
+    printf ']'
+}
+
+# -----------------------------------------------------------------------------
+# execute_tool_call() — dispatch to _tool_exec_<name>
+# -----------------------------------------------------------------------------
+execute_tool_call() {
+    local name="$1"
+    local fn="_tool_exec_${name}"
+    declare -F "$fn" &>/dev/null || { echo "Error: Unknown tool: $name"; return; }
+    "$fn" "$2"
+}
+
+# Tool exec functions — one _tool_exec_<name> per tool
+_tool_exec_read_file() {
+    local args_json="$1" fp offset limit
+    fp=$(echo "$args_json" | jq -r '.filePath // empty')
+    [[ -z "$fp" ]] && { echo "Error: filePath is required"; return; }
+    fp="${fp/#\~\//$HOME/}"
+    [[ "$fp" == "~" ]] && fp="$HOME"
+    offset=$(echo "$args_json" | jq -r '.offset // 1')
+    limit=$(echo "$args_json" | jq -r '.limit // 2000')
+    if [[ -f "$fp" ]]; then
+        tail -n +"$offset" "$fp" 2>/dev/null | head -n "$limit" || true
+    else
+        echo "Error: File not found: $fp"
+    fi
+}
+
+_tool_exec_grep() {
+    local args_json="$1" pattern gpath include
+    pattern=$(echo "$args_json" | jq -r '.pattern // empty')
+    [[ -z "$pattern" ]] && { echo "Error: pattern is required"; return; }
+    gpath=$(echo "$args_json" | jq -r '.path // "."')
+    gpath="${gpath/#\~\//$HOME/}"
+    [[ "$gpath" == "~" ]] && gpath="$HOME"
+    include=$(echo "$args_json" | jq -r '.include // "*"')
+    grep -rn --include="$include" "$pattern" "$gpath" 2>&1 | head -50 || true
+}
+
+_tool_exec_glob() {
+    local args_json="$1" gpattern gpath2
+    gpattern=$(echo "$args_json" | jq -r '.pattern // empty')
+    [[ -z "$gpattern" ]] && { echo "Error: pattern is required"; return; }
+    gpath2=$(echo "$args_json" | jq -r '.path // "."')
+    gpath2="${gpath2/#\~\//$HOME/}"
+    [[ "$gpath2" == "~" ]] && gpath2="$HOME"
+    find "$gpath2" -path "$gpath2/$gpattern" -type f 2>&1 | head -50 || true
+}
+
+# -----------------------------------------------------------------------------
+# _append_tool_result_message() — append a tool result to the chat file
+# -----------------------------------------------------------------------------
+_append_tool_result_message() {
+    local chat_id="$1"
+    local tool_call_id="$2"
+    local content="$3"
+    local file tmp
+    file="$(chat_filepath "$chat_id")"
+    [[ ! -f "$file" ]] && { color_echo "$C_RED" "Chat not found: $chat_id"; return 1; }
+    tmp="${file}.tmp.$$"
+    jq --arg tool_call_id "$tool_call_id" \
+        --rawfile content <(printf '%s' "$content") \
+        '.messages += [{role: "tool", tool_call_id: $tool_call_id, content: $content}]' \
+        "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+# -----------------------------------------------------------------------------
+# ANSI color escape variables
+# -----------------------------------------------------------------------------
+C_RESET=$'\033[0m'
+C_DIM=$'\033[2m'
+C_BOLD=$'\033[1m'
+C_RED=$'\033[31m'
+C_GREEN=$'\033[32m'
+C_YELLOW=$'\033[33m'
+C_BLUE=$'\033[34m'
+C_MAGENTA=$'\033[35m'
+C_CYAN=$'\033[36m'
+C_WHITE=$'\033[37m'
+C_GRAY=$'\033[90m'
+
+# -----------------------------------------------------------------------------
+# Utility: print colorized message to stderr
+# -----------------------------------------------------------------------------
+color_echo() {
+    local color="$1"
+    local message="$2"
+    echo -e "${color}${message}${C_RESET}" >&2
+}
+
+# -----------------------------------------------------------------------------
+# check_dependencies() — verify required external programs exist
+# -----------------------------------------------------------------------------
+check_dependencies() {
+    local missing=()
+    for cmd in curl jq; do
+        if ! command -v "$cmd" &>/dev/null; then
+            missing+=("$cmd")
+        fi
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        color_echo "$C_RED" "ERROR: Missing required dependencies: ${missing[*]}"
+        color_echo "$C_YELLOW" "Please install them and re-run."
+        exit 1
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# load_config() — read CONFIG_FILE if it exists (key=value format)
+# Sets global variables: default_thinking, default_model, API_KEY, API_BASE
+# -----------------------------------------------------------------------------
+load_config() {
+    if [[ -f "$CONFIG_FILE" ]]; then
+        while IFS='=' read -r key value; do
+            # Skip blank lines and comments
+            [[ -z "$key" || "$key" == \#* ]] && continue
+            case "$key" in
+                default_thinking) default_thinking="$value" ;;
+                default_model)    default_model="$value" ;;
+                api_key)
+                    if [[ -z "$API_KEY" ]]; then
+                        API_KEY="$value"
+                    fi
+                    ;;
+                api_base)
+                    if [[ "$API_BASE" == "$_API_BASE_DEFAULT" ]]; then
+                        API_BASE="$value"
+                    fi
+                    ;;
+            esac
+        done < "$CONFIG_FILE"
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# save_config() — write configuration to CONFIG_FILE
+# -----------------------------------------------------------------------------
+save_config() {
+    mkdir -p "$(dirname "$CONFIG_FILE")"
+    cat > "$CONFIG_FILE" <<EOF
+# llm-tui configuration
+default_thinking=${default_thinking}
+default_model=${default_model}
+api_key=${API_KEY}
+api_base=${API_BASE}
+EOF
+}
+
+# -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+detect_editor() {
+    if [[ -n "${EDITOR:-}" ]]; then
+        EDITOR_CMD="$EDITOR"
+    elif command -v xdg-open &>/dev/null; then
+        EDITOR_CMD="xdg-open"
+    else
+        color_echo "$C_RED" "ERROR: No editor found. Set \$EDITOR."
+        exit 1
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# find_clipboard_cmd() — detect available clipboard program
+# Sets global CLIP_CMD; empty string if none found
+# -----------------------------------------------------------------------------
+find_clipboard_cmd() {
+    local candidates=(
+        "wl-copy"
+        "xclip -selection clipboard"
+        "pbcopy"
+        "clip.exe"
+        "termux-clipboard-set"
+    )
+    for candidate in "${candidates[@]}"; do
+        # Extract the base command (first word)
+        local base_cmd="${candidate%% *}"
+        if command -v "$base_cmd" &>/dev/null; then
+            CLIP_CMD="$candidate"
+            return 0
+        fi
+    done
+    CLIP_CMD=""
+    return 1
+}
+
+# -----------------------------------------------------------------------------
+# copy_to_clipboard() — copy text to system clipboard
+# Reads from stdin if no argument given, otherwise copies the first argument.
+# Returns 0 on success, 1 on failure.
+# -----------------------------------------------------------------------------
+copy_to_clipboard() {
+    local text
+    if [[ $# -ge 1 ]]; then
+        text="$1"
+    else
+        text="$(cat)"
+    fi
+
+    if [[ -z "$CLIP_CMD" ]]; then
+        color_echo "$C_YELLOW" "No clipboard program available"
+        return 1
+    fi
+
+    case "$CLIP_CMD" in
+        wl-copy)
+            echo -n "$text" | wl-copy 2>/dev/null && return 0 || return 1
+            ;;
+        "xclip -selection clipboard")
+            echo -n "$text" | xclip -selection clipboard 2>/dev/null && return 0 || return 1
+            ;;
+        pbcopy)
+            echo -n "$text" | pbcopy 2>/dev/null && return 0 || return 1
+            ;;
+        clip.exe)
+            echo -n "$text" | clip.exe 2>/dev/null && return 0 || return 1
+            ;;
+        termux-clipboard-set)
+            echo -n "$text" | termux-clipboard-set 2>/dev/null && return 0 || return 1
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# -----------------------------------------------------------------------------
+# chat_filepath() — return the JSON file path for a given chat ID
+# -----------------------------------------------------------------------------
+chat_filepath() {
+    local chat_id="$1"
+    echo "${CHAT_DIR}/${chat_id}.json"
+}
+
+# -----------------------------------------------------------------------------
+# list_chats() — list all .json chat files with details
+# Output: one line per chat in format "ID|TITLE|COUNT|THINKING"
+# -----------------------------------------------------------------------------
+list_chats() {
+    mkdir -p "$CHAT_DIR"
+    local files=()
+    if [[ -d "$CHAT_DIR" ]]; then
+        # Collect .json files sorted by modification time (newest first)
+        while IFS= read -r -d '' f; do
+            files+=("$f")
+        done < <(find "$CHAT_DIR" -maxdepth 1 -name '*.json' -type f -printf '%T@ %p\0' 2>/dev/null | sort -rn -z | cut -d' ' -f2- -z)
+    fi
+
+    if [[ ${#files[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    for f in "${files[@]}"; do
+        local chat_id
+        chat_id="$(basename "$f" .json)"
+        local title count thinking
+        title="$(jq -r '.title // "Untitled"' "$f" 2>/dev/null || echo "Untitled")"
+        count="$(jq -r '(.messages // []) | length' "$f" 2>/dev/null || echo "0")"
+        thinking="$(jq -r '.thinking // false' "$f" 2>/dev/null || echo "false")"
+        printf '%s|%s|%s|%s\n' "$chat_id" "$title" "$count" "$thinking"
+    done
+}
+
+# -----------------------------------------------------------------------------
+# create_chat() — create a new chat JSON file
+# Parameters: optional title (defaults to "New Chat")
+# Echoes the new chat_id to stdout
+# -----------------------------------------------------------------------------
+create_chat() {
+    local title="${1:-New Chat}"
+    mkdir -p "$CHAT_DIR"
+
+    # Generate a unique ID using epoch seconds + nanoseconds + PID
+    local chat_id
+    chat_id="$(date +%s%N 2>/dev/null || date +%s)$$"
+
+    local file
+    file="$(chat_filepath "$chat_id")"
+
+    # Initialize chat JSON with a default system message
+    local default_system
+    if [[ "$default_thinking" == "max" ]]; then
+        default_system="$_MAX_THINKING_SYSTEM_PROMPT"
+    else
+        default_system="You are a helpful assistant."
+    fi
+    jq -n \
+        --arg title "$title" \
+        --arg thinking "$default_thinking" \
+        --arg system_msg "$default_system" \
+        '{
+            title: $title,
+            thinking: (if $thinking == "max" then "max" elif $thinking == "true" then true else false end),
+            messages: [
+                {role: "system", content: $system_msg}
+            ]
+        }' > "$file"
+
+    echo "$chat_id"
+}
+
+# -----------------------------------------------------------------------------
+# read_chat() — output the full JSON of a chat file
+# Returns 0 on success, 1 if file not found
+# -----------------------------------------------------------------------------
+read_chat() {
+    local chat_id="$1"
+    local file
+    file="$(chat_filepath "$chat_id")"
+    if [[ ! -f "$file" ]]; then
+        color_echo "$C_RED" "Chat not found: $chat_id"
+        return 1
+    fi
+    cat "$file"
+}
+
+# -----------------------------------------------------------------------------
+# write_chat() — overwrite a chat file with new JSON (pretty-printed)
+# Parameters: chat_id, json_string
+# -----------------------------------------------------------------------------
+write_chat() {
+    local chat_id="$1"
+    local json_str="$2"
+    local file
+    file="$(chat_filepath "$chat_id")"
+    local tmp="${file}.tmp.$$"
+    echo "$json_str" | jq '.' > "$tmp" && mv "$tmp" "$file"
+}
+
+# -----------------------------------------------------------------------------
+# delete_chat() — remove a chat file by ID
+# -----------------------------------------------------------------------------
+delete_chat() {
+    local chat_id="$1"
+    local file
+    file="$(chat_filepath "$chat_id")"
+    if [[ -f "$file" ]]; then
+        rm -f "$file"
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# get_message() — extract a single message by index (0-based)
+# Parameters: chat_id, index
+# Outputs the message JSON object
+# -----------------------------------------------------------------------------
+get_message() {
+    local chat_id="$1"
+    local index="$2"
+    local file
+    file="$(chat_filepath "$chat_id")"
+    if [[ ! -f "$file" ]]; then
+        color_echo "$C_RED" "Chat not found: $chat_id"
+        return 1
+    fi
+    jq --argjson idx "$index" '.messages[$idx]' "$file"
+}
+
+# -----------------------------------------------------------------------------
+# update_message() — update the content of a message at a given index
+# Parameters: chat_id, index, new_content
+# -----------------------------------------------------------------------------
+update_message() {
+    local chat_id="$1"
+    local index="$2"
+    local new_content="$3"
+    local file
+    file="$(chat_filepath "$chat_id")"
+    if [[ ! -f "$file" ]]; then
+        color_echo "$C_RED" "Chat not found: $chat_id"
+        return 1
+    fi
+    local tmp="${file}.tmp.$$"
+    jq --argjson idx "$index" \
+        --rawfile content <(printf '%s' "$new_content") \
+        '.messages[$idx].content = $content' \
+        "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+# -----------------------------------------------------------------------------
+# append_message() — append a message to the messages array
+# Parameters: chat_id, role, content [, thinking [, tool_calls_json]]
+# -----------------------------------------------------------------------------
+append_message() {
+    local chat_id="$1"
+    local role="$2"
+    local content="$3"
+    local thinking="${4:-}"
+    local tool_calls="${5:-}"
+    local file
+    file="$(chat_filepath "$chat_id")"
+    if [[ ! -f "$file" ]]; then
+        color_echo "$C_RED" "Chat not found: $chat_id"
+        return 1
+    fi
+    local tmp="${file}.tmp.$$"
+
+    if [[ -n "$tool_calls" && "$tool_calls" != "[]" && "$tool_calls" != "null" ]]; then
+        if [[ -n "$thinking" ]]; then
+            jq --arg role "$role" \
+                --rawfile content <(printf '%s' "$content") \
+                --rawfile thinking <(printf '%s' "$thinking") \
+                --argjson tool_calls "$tool_calls" \
+                '.messages += [{role: $role, content: $content, thinking: $thinking, tool_calls: $tool_calls}]' \
+                "$file" > "$tmp" && mv "$tmp" "$file"
+        else
+            jq --arg role "$role" \
+                --rawfile content <(printf '%s' "$content") \
+                --argjson tool_calls "$tool_calls" \
+                '.messages += [{role: $role, content: $content, tool_calls: $tool_calls}]' \
+                "$file" > "$tmp" && mv "$tmp" "$file"
+        fi
+    elif [[ -n "$thinking" ]]; then
+        jq --arg role "$role" \
+            --rawfile content <(printf '%s' "$content") \
+            --rawfile thinking <(printf '%s' "$thinking") \
+            '.messages += [{role: $role, content: $content, thinking: $thinking}]' \
+            "$file" > "$tmp" && mv "$tmp" "$file"
+    else
+        jq --arg role "$role" \
+            --rawfile content <(printf '%s' "$content") \
+            '.messages += [{role: $role, content: $content}]' \
+            "$file" > "$tmp" && mv "$tmp" "$file"
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# get_active_tools_json() — read active tool names from chat and build JSON array
+# -----------------------------------------------------------------------------
+get_active_tools_json() {
+    local chat_id="$1"
+    local file
+    file="$(chat_filepath "$chat_id")"
+    if [[ ! -f "$file" ]]; then
+        echo "[]"
+        return
+    fi
+    local names
+    names=$(jq -r '.active_tools // [] | join(" ")' "$file" 2>/dev/null)
+    if [[ -z "$names" ]]; then
+        echo "[]"
+        return
+    fi
+    # shellcheck disable=SC2086
+    build_active_tools_json $names
+}
+
+# -----------------------------------------------------------------------------
+# store_assistant_result() — parse _LLM_RESULT and append assistant message
+# Parameters: chat_id, result_json
+# -----------------------------------------------------------------------------
+store_assistant_result() {
+    local chat_id="$1"
+    local result_json="$2"
+    local thinking content tool_calls
+    thinking=$(echo "$result_json" | jq -rj '.thinking // ""'; printf x); thinking="${thinking%x}"
+    content=$(echo "$result_json" | jq -rj '.content // ""'; printf x); content="${content%x}"
+    tool_calls=$(echo "$result_json" | jq -rc '.tool_calls // empty' 2>/dev/null) || true
+
+    if [[ -n "$tool_calls" && "$tool_calls" != "[]" && "$tool_calls" != "null" ]]; then
+        append_message "$chat_id" "assistant" "$content" "$thinking" "$tool_calls"
+    elif [[ -n "$thinking" ]]; then
+        append_message "$chat_id" "assistant" "$content" "$thinking"
+    else
+        append_message "$chat_id" "assistant" "$content"
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# set_active_tools() — replace the .active_tools array on a chat
+# Parameters: chat_id, tool_names (space-separated)
+# -----------------------------------------------------------------------------
+set_active_tools() {
+    local chat_id="$1"
+    shift
+    local file
+    file="$(chat_filepath "$chat_id")"
+    if [[ ! -f "$file" ]]; then
+        color_echo "$C_RED" "Chat not found: $chat_id"
+        return 1
+    fi
+    local tmp="${file}.tmp.$$"
+    if [[ $# -eq 0 ]]; then
+        jq 'del(.active_tools)' "$file" > "$tmp" && mv "$tmp" "$file"
+    else
+        local args_json
+        args_json=$(printf '%s\n' "$@" | jq -R . | jq -s .)
+        jq --argjson names "$args_json" '.active_tools = $names' "$file" > "$tmp" && mv "$tmp" "$file"
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# remove_messages_after() — truncate messages array before a given index
+# Keeps messages with indices < $index (i.e., removes index and beyond)
+# Parameters: chat_id, index
+# -----------------------------------------------------------------------------
+remove_messages_after() {
+    local chat_id="$1"
+    local index="$2"
+    local file
+    file="$(chat_filepath "$chat_id")"
+    if [[ ! -f "$file" ]]; then
+        color_echo "$C_RED" "Chat not found: $chat_id"
+        return 1
+    fi
+    local tmp="${file}.tmp.$$"
+    jq --argjson idx "$index" 'del(.messages[range($idx; (.messages | length))])' \
+        "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+# -----------------------------------------------------------------------------
+# set_chat_thinking() — set the .thinking field on a chat
+# Parameters: chat_id, bool ("true" or "false")
+# -----------------------------------------------------------------------------
+set_chat_thinking() {
+    local chat_id="$1"
+    local value="$2"
+    local file
+    file="$(chat_filepath "$chat_id")"
+    if [[ ! -f "$file" ]]; then
+        color_echo "$C_RED" "Chat not found: $chat_id"
+        return 1
+    fi
+    local tmp="${file}.tmp.$$"
+    local json_val
+    if [[ "$value" == "max" ]]; then
+        json_val='"max"'
+    elif [[ "$value" == "true" || "$value" == "1" ]]; then
+        json_val='true'
+    else
+        json_val='false'
+    fi
+    jq --argjson val "$json_val" '.thinking = $val' \
+        "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+# -----------------------------------------------------------------------------
+# set_chat_title() — set the .title field on a chat
+# Parameters: chat_id, title
+# -----------------------------------------------------------------------------
+set_chat_title() {
+    local chat_id="$1"
+    local title="$2"
+    local file
+    file="$(chat_filepath "$chat_id")"
+    if [[ ! -f "$file" ]]; then
+        color_echo "$C_RED" "Chat not found: $chat_id"
+        return 1
+    fi
+    local tmp="${file}.tmp.$$"
+    jq --arg title "$title" '.title = $title' \
+        "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+# -----------------------------------------------------------------------------
+# build_request_body() — build the JSON request body for the API
+# Parameters: messages_json (JSON array string), thinking_enabled ("true"/"false")
+#             [, tools_json (JSON array of tool schemas, empty/"[]" = none)]
+# Outputs the request body JSON to stdout
+# -----------------------------------------------------------------------------
+build_request_body() {
+    local messages_json="$1"
+    local thinking_enabled="$2"
+    local tools_json="${3:-}"
+
+    # Strip extra fields (like .thinking) from messages, keeping role, content, tool_calls, tool_call_id
+    local clean_messages
+    clean_messages=$(echo "$messages_json" | jq '[.[] | {role, content} + (if .tool_calls then {tool_calls} else {} end) + (if .tool_call_id then {tool_call_id} else {} end) | if .content == "" and .tool_calls then del(.content) else . end]')
+
+    if [[ "$thinking_enabled" == "true" || "$thinking_enabled" == "max" ]]; then
+        if [[ -n "$tools_json" && "$tools_json" != "[]" ]]; then
+            printf '%s' "$clean_messages" | jq -n \
+                --arg model "$default_model" \
+                --argjson tools "$tools_json" \
+                '{
+                    model: $model,
+                    messages: input,
+                    stream: true,
+                    thinking: {type: "enabled"},
+                    reasoning_effort: "high",
+                    tools: $tools
+                }'
+        else
+            printf '%s' "$clean_messages" | jq -n \
+                --arg model "$default_model" \
+                '{
+                    model: $model,
+                    messages: input,
+                    stream: true,
+                    thinking: {type: "enabled"},
+                    reasoning_effort: "high"
+                }'
+        fi
+    else
+        if [[ -n "$tools_json" && "$tools_json" != "[]" ]]; then
+            printf '%s' "$clean_messages" | jq -n \
+                --arg model "$default_model" \
+                --argjson tools "$tools_json" \
+                '{
+                    model: $model,
+                    messages: input,
+                    stream: true,
+                    thinking: {type: "disabled"},
+                    tools: $tools
+                }'
+        else
+            printf '%s' "$clean_messages" | jq -n \
+                --arg model "$default_model" \
+                '{
+                    model: $model,
+                    messages: input,
+                    stream: true,
+                    thinking: {type: "disabled"}
+                }'
+        fi
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# call_llm_stream() — call the LLM API with streaming via SSE
+# Parameters: messages_json (JSON array string), thinking_enabled ("true"/"false")
+#             [, tools_json (JSON array of tool schemas) ]
+# Outputs accumulated result as JSON via _LLM_RESULT:
+#   {"thinking": "...", "content": "...", "tool_calls": [...]}
+# Also prints streaming tokens to stdout in real-time
+# -----------------------------------------------------------------------------
+call_llm_stream() {
+    local messages_json="$1"
+    local thinking_enabled="$2"
+    local tools_json="${3:-}"
+
+    if [[ -z "$API_KEY" ]]; then
+        printf "${C_RED}ERROR: API_KEY is not set.${C_RESET}\n"
+        return 1
+    fi
+
+    local request_body
+    request_body=$(build_request_body "$messages_json" "$thinking_enabled" "$tools_json")
+
+    local full_thinking="" full_content="" first_line="" line data
+    local thinking content api_err
+    local transitioned=false
+    local curl_err
+    curl_err=$(mktemp)
+
+    # Tool call accumulation
+    local -A _tc_id=() _tc_name=() _tc_args=()
+    local -a _tc_indices=()
+
+    while IFS= read -r line; do
+        [[ -z "$first_line" && -n "$line" ]] && first_line="$line"
+
+        [[ "$line" =~ ^data:\ (.*) ]] || continue
+        data="${BASH_REMATCH[1]}"
+        [[ "$data" == "[DONE]" ]] && continue
+
+        api_err=$(jq -r '.error.message // empty' <<< "$data" 2>/dev/null) || true
+        if [[ -n "$api_err" ]]; then
+            printf "\n${C_RED}API error: %s${C_RESET}\n" "$api_err"
+            rm -f "$curl_err"
+            return 1
+        fi
+
+        thinking=$(jq -rj '.choices[0].delta.reasoning_content // empty' <<< "$data" 2>/dev/null; printf x) || true
+        thinking="${thinking%x}"
+        content=$(jq -rj '.choices[0].delta.content // empty' <<< "$data" 2>/dev/null; printf x) || true
+        content="${content%x}"
+
+        if [[ -n "$thinking" ]]; then
+            [[ "$show_thinking" == "true" ]] && printf "${C_GRAY}%s${C_RESET}" "$thinking"
+            full_thinking+="$thinking"
+        fi
+        if [[ -n "$content" ]]; then
+            if [[ "$transitioned" == false && -n "$full_thinking" && "$show_thinking" == "true" ]]; then
+                printf "\n"
+                transitioned=true
+            fi
+            printf "%s" "$content"
+            full_content+="$content"
+        fi
+
+        # Handle tool_calls delta
+        local tc_count
+        tc_count=$(jq '.choices[0].delta.tool_calls | length // 0' <<< "$data" 2>/dev/null) || tc_count=0
+        if [[ "$tc_count" -gt 0 ]]; then
+            local i=0
+            while [[ $i -lt $tc_count ]]; do
+                local tc_idx
+                tc_idx=$(jq -r ".choices[0].delta.tool_calls[$i].index // empty" <<< "$data" 2>/dev/null) || true
+                [[ -z "$tc_idx" ]] && { ((i++)); continue; }
+
+                local tc_func_name tc_func_args tc_call_id
+                tc_func_name=$(jq -r ".choices[0].delta.tool_calls[$i].function.name // empty" <<< "$data" 2>/dev/null) || true
+                tc_func_args=$(jq -r ".choices[0].delta.tool_calls[$i].function.arguments // empty" <<< "$data" 2>/dev/null) || true
+                tc_call_id=$(jq -r ".choices[0].delta.tool_calls[$i].id // empty" <<< "$data" 2>/dev/null) || true
+
+                [[ -n "$tc_call_id" ]] && _tc_id["$tc_idx"]="$tc_call_id"
+                [[ -n "$tc_func_name" ]] && _tc_name["$tc_idx"]="$tc_func_name"
+                [[ -n "$tc_func_args" ]] && _tc_args["$tc_idx"]+="$tc_func_args"
+
+                # Track index order
+                local found=0
+                for idx in "${_tc_indices[@]}"; do
+                    [[ "$idx" == "$tc_idx" ]] && { found=1; break; }
+                done
+                [[ $found -eq 0 ]] && _tc_indices+=("$tc_idx")
+
+                ((i++))
+            done
+        fi
+    done < <(curl -s -N --connect-timeout 10 --max-time 120 \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $API_KEY" \
+        -d "$request_body" \
+        "${API_BASE}/chat/completions" 2>"$curl_err")
+
+    # Build tool_calls JSON array from accumulated data
+    local tool_calls_json="[]"
+    if [[ ${#_tc_indices[@]} -gt 0 ]]; then
+        # Display tool calls to user
+        if [[ "$transitioned" == false && -n "$full_thinking" && "$show_thinking" == "true" ]]; then
+            printf "\n"
+            transitioned=true
+        fi
+        local first_tc=true
+        tool_calls_json="["
+        for idx in "${_tc_indices[@]}"; do
+            [[ "$first_tc" != true ]] && tool_calls_json+=","
+            first_tc=false
+            printf "${C_YELLOW}[tool:%s]${C_RESET}" "${_tc_name[$idx]}"
+            local tc_id="${_tc_id[$idx]}"
+            [[ -z "$tc_id" ]] && tc_id="call_${idx}_$(date +%s%N)"
+            tool_calls_json+=$(jq -n \
+                --arg id "$tc_id" \
+                --arg name "${_tc_name[$idx]}" \
+                --arg args "${_tc_args[$idx]}" \
+                '{id: $id, type: "function", function: {name: $name, arguments: $args}}')
+        done
+        tool_calls_json+="]"
+        printf "\n"
+    fi
+
+    if [[ -z "$full_content" && -z "$full_thinking" && ${#_tc_indices[@]} -eq 0 ]]; then
+        if [[ -n "$first_line" ]]; then
+            api_err=$(jq -r '.error.message // empty' <<< "$first_line" 2>/dev/null) || true
+            if [[ -n "$api_err" ]]; then
+                printf "\n${C_RED}API error: %s${C_RESET}\n" "$api_err"
+            else
+                printf "\n${C_RED}Empty response from API.${C_RESET}\n"
+                printf "${C_DIM}Raw: %s${C_RESET}\n" "$first_line"
+            fi
+        else
+            printf "\n${C_RED}No response received.${C_RESET}\n"
+            printf "${C_DIM}  request size: %d bytes${C_RESET}\n" "${#request_body}"
+            if [[ -s "$curl_err" ]]; then
+                printf "${C_DIM}  curl: %s${C_RESET}\n" "$(head -c 200 "$curl_err")"
+            fi
+        fi
+        rm -f "$curl_err"
+        return 1
+    fi
+
+    rm -f "$curl_err"
+    printf "\n"
+
+    _LLM_RESULT=$(jq -n \
+        --rawfile thinking <(printf '%s' "$full_thinking") \
+        --rawfile content <(printf '%s' "$full_content") \
+        --argjson tool_calls "$tool_calls_json" \
+        '{thinking: $thinking, content: $content, tool_calls: $tool_calls}')
+}
+
+# -----------------------------------------------------------------------------
+# call_llm() — non-streaming (fallback) call to the LLM API
+# Parameters: messages_json (JSON array string), thinking_enabled ("true"/"false")
+#             [, tools_json (JSON array of tool schemas) ]
+# Outputs result as JSON: {"thinking": "...", "content": "...", "tool_calls": [...]}
+# -----------------------------------------------------------------------------
+call_llm() {
+    local messages_json="$1"
+    local thinking_enabled="$2"
+    local tools_json="${3:-}"
+
+    if [[ -z "$API_KEY" ]]; then
+        color_echo "$C_RED" "ERROR: API_KEY is not set."
+        return 1
+    fi
+
+    # Build request body WITHOUT streaming
+    local request_body
+    local clean_messages
+    clean_messages=$(echo "$messages_json" | jq '[.[] | {role, content} + (if .tool_calls then {tool_calls} else {} end) + (if .tool_call_id then {tool_call_id} else {} end) | if .content == "" and .tool_calls then del(.content) else . end]')
+
+    if [[ -n "$tools_json" && "$tools_json" != "[]" ]]; then
+        if [[ "$thinking_enabled" == "true" || "$thinking_enabled" == "max" ]]; then
+            request_body=$(printf '%s' "$clean_messages" | jq -n \
+                --arg model "$default_model" \
+                --argjson tools "$tools_json" \
+                '{
+                    model: $model,
+                    messages: input,
+                    stream: false,
+                    thinking: {type: "enabled"},
+                    reasoning_effort: "high",
+                    tools: $tools
+                }')
+        else
+            request_body=$(printf '%s' "$clean_messages" | jq -n \
+                --arg model "$default_model" \
+                --argjson tools "$tools_json" \
+                '{
+                    model: $model,
+                    messages: input,
+                    stream: false,
+                    tools: $tools
+                }')
+        fi
+    else
+        if [[ "$thinking_enabled" == "true" || "$thinking_enabled" == "max" ]]; then
+            request_body=$(printf '%s' "$clean_messages" | jq -n \
+                --arg model "$default_model" \
+                '{
+                    model: $model,
+                    messages: input,
+                    stream: false,
+                    thinking: {type: "enabled"},
+                    reasoning_effort: "high"
+                }')
+        else
+            request_body=$(printf '%s' "$clean_messages" | jq -n \
+                --arg model "$default_model" \
+                '{
+                    model: $model,
+                    messages: input,
+                    stream: false
+                }')
+        fi
+    fi
+
+    color_echo "$C_DIM" "Calling API (non-streaming): POST ${API_BASE}/chat/completions"
+
+    local response curl_err
+    curl_err=$(mktemp)
+    response=$(curl -s "$API_BASE/chat/completions" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $API_KEY" \
+        -d "$request_body" 2>"$curl_err")
+
+    # Check for API error
+    local err_msg
+    err_msg=$(echo "$response" | jq -r '.error.message // empty' 2>/dev/null)
+    if [[ -n "$err_msg" ]]; then
+        color_echo "$C_RED" "API error: $err_msg"
+        rm -f "$curl_err"
+        return 1
+    elif [[ -z "$response" ]]; then
+        color_echo "$C_RED" "No response received."
+        if [[ -s "$curl_err" ]]; then
+            color_echo "$C_DIM" "curl: $(head -c 200 "$curl_err")"
+        fi
+        rm -f "$curl_err"
+        return 1
+    fi
+    rm -f "$curl_err"
+
+    local thinking content tool_calls
+    thinking=$(echo "$response" | jq -r '.choices[0].message.reasoning_content // empty' 2>/dev/null)
+    content=$(echo "$response" | jq -r '.choices[0].message.content // empty' 2>/dev/null)
+    tool_calls=$(echo "$response" | jq -r '.choices[0].message.tool_calls // empty' 2>/dev/null) || true
+
+    if [[ -n "$thinking" ]]; then
+        printf "${C_GRAY}%s${C_RESET}\n" "$thinking" >&2
+    fi
+    if [[ -n "$content" ]]; then
+        printf "%s\n" "$content" >&2
+    fi
+    if [[ -n "$tool_calls" && "$tool_calls" != "null" ]]; then
+        printf "${C_YELLOW}[tool_calls] %s${C_RESET}\n" "$(echo "$tool_calls" | jq -r '.[].function.name')" >&2
+    fi
+
+    jq -n \
+        --rawfile thinking <(printf '%s' "$thinking") \
+        --rawfile content <(printf '%s' "$content") \
+        --argjson tool_calls "${tool_calls:-[]}" \
+        '{thinking: $thinking, content: $content, tool_calls: $tool_calls}'
+}
+
+# -----------------------------------------------------------------------------
+# send_message() — high-level: send user message and get assistant response
+# Parameters: chat_id, user_content
+# Updates the chat file with user message + assistant response (with thinking)
+# -----------------------------------------------------------------------------
+send_message() {
+    local chat_id="$1"
+    local user_content="$2"
+
+    local file
+    file="$(chat_filepath "$chat_id")"
+    if [[ ! -f "$file" ]]; then
+        color_echo "$C_RED" "Chat not found: $chat_id"
+        return 1
+    fi
+
+    # Check if this is the first user message (before appending)
+    local msg_count_before
+    msg_count_before=$(jq '.messages | length' "$file" 2>/dev/null || echo "0")
+    local is_first_user="false"
+    if [[ "$msg_count_before" == "1" ]]; then
+        is_first_user="true"
+    fi
+
+    # Append the user message
+    append_message "$chat_id" "user" "$user_content"
+
+    # Get current messages and tools setting
+    local tools_json
+    tools_json=$(get_active_tools_json "$chat_id")
+
+    # Agent loop if tools active, otherwise simple call
+    if [[ -n "$tools_json" && "$tools_json" != "[]" ]]; then
+        agent_loop "$chat_id" || {
+            color_echo "$C_RED" "Agent loop failed"
+            return 1
+        }
+    else
+        local messages_json thinking_enabled
+        messages_json=$(jq '.messages' "$file")
+        thinking_enabled=$(jq -r '.thinking // false' "$file")
+
+        # Call the streaming API
+        local result_json call_rc
+        call_rc=0
+        call_llm_stream "$messages_json" "$thinking_enabled" "" || call_rc=$?
+        result_json="$_LLM_RESULT"
+
+        if [[ $call_rc -ne 0 ]]; then
+            color_echo "$C_RED" "API call failed"
+            return 1
+        fi
+
+        # Parse the result and check for empty content + no tool calls
+        local assistant_content
+        assistant_content=$(echo "$result_json" | jq -rj '.content // ""'; printf x)
+        assistant_content="${assistant_content%x}"
+        local tool_calls
+        tool_calls=$(echo "$result_json" | jq -rc '.tool_calls // empty' 2>/dev/null) || true
+
+        if [[ -z "$assistant_content" && ( -z "$tool_calls" || "$tool_calls" == "[]" || "$tool_calls" == "null" ) ]]; then
+            local assistant_thinking
+            assistant_thinking=$(echo "$result_json" | jq -rj '.thinking // ""'; printf x)
+            assistant_thinking="${assistant_thinking%x}"
+            if [[ -z "$assistant_thinking" ]]; then
+                color_echo "$C_RED" "ERROR: Empty response from API"
+                return 1
+            fi
+        fi
+
+        # Append the assistant response
+        store_assistant_result "$chat_id" "$result_json"
+    fi
+
+    # Auto-set title from first user message
+    if [[ "$is_first_user" == "true" ]]; then
+        local auto_title
+        auto_title=$(echo "$user_content" | head -c 50)
+        set_chat_title "$chat_id" "$auto_title"
+        color_echo "$C_DIM" "Set chat title: $auto_title"
+    fi
+
+    return 0
+}
+
+# -----------------------------------------------------------------------------
+# TUI RENDERING FUNCTIONS
+# -----------------------------------------------------------------------------
+
+# Terminal width (cached once; can be overridden via env)
+TERM_WIDTH="${TERM_WIDTH:-$(tput cols 2>/dev/null || echo 80)}"
+
+# clear_screen() — clear the terminal
+clear_screen() {
+    tput clear 2>/dev/null || printf '\033[2J\033[H'
+}
+
+# draw_divider() — draw a horizontal rule across the terminal
+draw_divider() {
+    local char="${1:--}"
+    local line
+    printf -v line '%*s' "$TERM_WIDTH" ''
+    printf '%s\n' "${line// /$char}"
+}
+
+# draw_header() — print a centered title bar with box-drawing characters
+draw_header() {
+    local title="$1"
+    local inner_width=$((TERM_WIDTH - 2))
+
+    # Build the full title text with padding
+    local full_title=" LLM TUI - ${title} "
+
+    # Truncate if too long (leave room for ellipsis)
+    if [[ ${#full_title} -gt $inner_width ]]; then
+        local max_title_len=$((inner_width - 4))  # " LLM TUI - " + "... "
+        if [[ $max_title_len -lt 1 ]]; then
+            max_title_len=1
+        fi
+        full_title=" LLM TUI - ${title:0:$max_title_len}... "
+        # Final safety: if still too long, brute-force truncate
+        if [[ ${#full_title} -gt $inner_width ]]; then
+            full_title="${full_title:0:$inner_width}"
+        fi
+    fi
+
+    local title_len=${#full_title}
+    local left_pad=$(( (inner_width - title_len) / 2 ))
+    local right_pad=$(( inner_width - title_len - left_pad ))
+
+    local border_line
+    printf -v border_line '%*s' "$inner_width" ''
+    border_line="${border_line// /═}"
+
+    printf "╔%s╗\n" "$border_line"
+    printf "║%*s%s%*s║\n" "$left_pad" '' "$full_title" "$right_pad" ''
+    printf "╚%s╝\n" "$border_line"
+}
+
+# format_message_content() — print multiline content with continuation indent
+# Args: content, indent_spaces
+format_message_content() {
+    local content="$1"
+    local indent="${2:-0}"
+    local first=1
+    while IFS= read -r line; do
+        if [[ $first -eq 1 ]]; then
+            printf "%s\n" "$line"
+            first=0
+        else
+            printf "%*s%s\n" "$indent" "" "$line"
+        fi
+    done <<< "$content"
+}
+
+# draw_message() — format a single message (1-indexed for display)
+draw_message() {
+    local index="$1"   # 1-indexed display index (0 for system)
+    local role="$2"
+    local content="$3"
+    local thinking="${4:-}"
+    local tool_calls="${5:-}"
+
+    case "$role" in
+        system)
+            printf "${C_YELLOW}[System]${C_RESET}\n"
+            printf "%s\n" "$content"
+            ;;
+        user)
+            printf "${C_BOLD}${C_GREEN}[%d] You${C_RESET}\n" "$index"
+            printf "%s\n" "$content"
+            ;;
+        assistant)
+            printf "${C_BOLD}${C_CYAN}[%d] %s${C_RESET}\n" "$index" "$default_model"
+            if [[ -n "$thinking" && "$show_thinking" == "true" ]]; then
+                printf "${C_GRAY}%s${C_RESET}\n" "$thinking"
+            fi
+            if [[ -n "$tool_calls" && "$tool_calls" != "null" ]]; then
+                local tc_names
+                tc_names=$(echo "$tool_calls" | jq -r '.[].function.name' 2>/dev/null)
+                if [[ -n "$tc_names" ]]; then
+                    while IFS= read -r tc_n; do
+                        printf "${C_YELLOW}  [tool:%s]${C_RESET}\n" "$tc_n"
+                    done <<< "$tc_names"
+                fi
+            fi
+            printf "%s\n" "$content"
+            ;;
+        tool)
+            printf "${C_DIM}[tool]${C_RESET}\n"
+            local tool_result_preview
+            tool_result_preview=$(echo "$content" | head -c 200)
+            printf "${C_DIM}%s${C_RESET}\n" "$tool_result_preview"
+            ;;
+        *)
+            printf "[%d] %s\n" "$index" "$role"
+            printf "%s\n" "$content"
+            ;;
+    esac
+}
+
+# draw_chat() — clear screen and render the full chat
+draw_chat() {
+    local chat_id="$1"
+    local file
+    file="$(chat_filepath "$chat_id")"
+
+    if [[ ! -f "$file" ]]; then
+        color_echo "$C_RED" "Chat not found: $chat_id"
+        return 1
+    fi
+
+    local chat_json
+    chat_json=$(cat "$file")
+
+    local title thinking model active_tools
+    title=$(echo "$chat_json" | jq -r '.title // "Untitled"')
+    thinking=$(echo "$chat_json" | jq -r '.thinking // false')
+    model="$default_model"
+    active_tools=$(echo "$chat_json" | jq -r '.active_tools // [] | join(",")' 2>/dev/null)
+
+    clear_screen
+
+    local thinking_label
+    if [[ "$thinking" == "max" ]]; then
+        thinking_label="MAX"
+    elif [[ "$thinking" == "true" ]]; then
+        thinking_label="HIGH"
+    else
+        thinking_label="OFF"
+    fi
+    local tools_str=""
+    if [[ -n "$active_tools" ]]; then
+        tools_str="  [Tools: ${active_tools}]"
+    fi
+    draw_header "Chat: ${title}  [Thinking: ${thinking_label}]  [Model: ${model}]${tools_str}"
+
+    # Messages
+    local msg_count
+    msg_count=$(echo "$chat_json" | jq '.messages | length')
+    local user_idx=0
+    local i
+    for (( i=0; i<msg_count; i++ )); do
+        local role content msg_thinking msg_tool_calls
+        role=$(echo "$chat_json" | jq -r ".messages[$i].role // empty")
+        content=$(echo "$chat_json" | jq -r ".messages[$i].content // \"\"")
+        msg_thinking=$(echo "$chat_json" | jq -r ".messages[$i].thinking // \"\"")
+        msg_tool_calls=$(echo "$chat_json" | jq -r ".messages[$i].tool_calls // empty" 2>/dev/null) || true
+
+        case "$role" in
+            system)
+                draw_message 0 "$role" "$content" ""
+                ;;
+            user)
+                (( ++user_idx ))
+                draw_message "$user_idx" "$role" "$content" ""
+                ;;
+            assistant)
+                draw_message "$user_idx" "$role" "$content" "$msg_thinking" "$msg_tool_calls"
+                ;;
+            tool)
+                draw_message "$user_idx" "$role" "$content" ""
+                ;;
+        esac
+    done
+
+    # Divider at bottom
+    draw_divider "─"
+}
+
+# -----------------------------------------------------------------------------
+# INTERACTIVE LOOPS
+# -----------------------------------------------------------------------------
+
+# read_key() — read one keypress; prints a key name to stdout
+read_key() {
+    local key seq1 seq2
+    IFS= read -rsn1 key || true
+    if [[ "$key" == $'\033' ]]; then
+        IFS= read -rsn1 -t 0.1 seq1 || true
+        IFS= read -rsn1 -t 0.1 seq2 || true
+        case "${seq1}${seq2}" in
+            '[A') printf 'up' ;;
+            '[B') printf 'down' ;;
+            '[C') printf 'right' ;;
+            '[D') printf 'left' ;;
+            *)    printf 'esc' ;;
+        esac
+    elif [[ "$key" == '' || "$key" == $'\r' ]]; then
+        printf 'enter'
+    else
+        printf '%s' "$key"
+    fi
+}
+
+
+# handle_new_chat() — create a new chat and enter it
+handle_new_chat() {
+    local chat_id
+    chat_id=$(create_chat "New Chat")
+    chat_loop "$chat_id"
+}
+
+# handle_resume_chat() — list existing chats and pick one
+handle_resume_chat() {
+    clear_screen
+    draw_header "Resume Chat"
+    echo ""
+
+    local chat_list
+    chat_list=$(list_chats)
+
+    if [[ -z "$chat_list" ]]; then
+        echo "  No chats found."
+        echo ""
+        printf "  Press Enter to go back..."
+        read -r
+        return 0
+    fi
+
+    # Parse into arrays
+    local -a ids titles counts thinkings
+    local line idx=1
+    while IFS='|' read -r id title count thinking; do
+        ids+=("$id")
+        titles+=("$title")
+        counts+=("$count")
+        thinkings+=("$thinking")
+        local think_label
+        if [[ "$thinking" == "max" ]]; then
+            think_label="MAX"
+        elif [[ "$thinking" == "true" ]]; then
+            think_label="HIGH"
+        else
+            think_label="OFF"
+        fi
+        printf "  ${C_BOLD}%d${C_RESET}. %s  [%s msgs] [Thinking: %s]\n" \
+            "$idx" "$title" "$count" "$think_label"
+        ((idx++))
+    done <<< "$chat_list"
+
+    echo "  ${C_BOLD}0${C_RESET}. Back"
+    echo ""
+    printf "Select [0-%d]: " "$(( idx - 1 ))"
+    read -r pick || { echo ""; return 0; }
+
+    if [[ "$pick" =~ ^[0-9]+$ && "$pick" -ge 1 && "$pick" -lt "$idx" ]]; then
+        chat_loop "${ids[$pick-1]}"
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# agent_loop() — multi-turn tool execution loop (like nanocode agent_loop)
+# Calls API, executes tools, feeds results back, repeats until no tool_calls.
+# Stores intermediate messages in the chat file and returns 0 on success.
+# -----------------------------------------------------------------------------
+agent_loop() {
+    local chat_id="$1"
+    local file
+    file="$(chat_filepath "$chat_id")"
+
+    local max_turns=10
+    local turn=0
+
+    while [[ $turn -lt $max_turns ]]; do
+        ((turn++))
+
+        local messages_json thinking_enabled tools_json
+        messages_json=$(jq '.messages' "$file")
+        thinking_enabled=$(jq -r '.thinking // false' "$file")
+        tools_json=$(get_active_tools_json "$chat_id")
+
+        printf "${C_BOLD}${C_CYAN}[%s]${C_RESET}" "$default_model"
+        [[ $turn -gt 1 ]] && printf " ${C_DIM}(turn %d)${C_RESET}" "$turn"
+        printf "\n"
+
+        local call_rc=0
+        call_llm_stream "$messages_json" "$thinking_enabled" "$tools_json" || call_rc=$?
+
+        if [[ $call_rc -ne 0 ]]; then
+            echo ""
+            return 1
+        fi
+
+        local result_json
+        result_json="$_LLM_RESULT"
+
+        local content thinking tool_calls_json
+        content=$(echo "$result_json" | jq -rj '.content // ""'; printf x); content="${content%x}"
+        thinking=$(echo "$result_json" | jq -rj '.thinking // ""'; printf x); thinking="${thinking%x}"
+        tool_calls_json=$(echo "$result_json" | jq -rc '.tool_calls // empty' 2>/dev/null) || true
+
+        # No tool calls — final response
+        if [[ -z "$tool_calls_json" || "$tool_calls_json" == "[]" || "$tool_calls_json" == "null" ]]; then
+            store_assistant_result "$chat_id" "$result_json"
+            return 0
+        fi
+
+        # Store assistant message with tool_calls
+        if [[ -n "$thinking" ]]; then
+            append_message "$chat_id" "assistant" "$content" "$thinking" "$tool_calls_json"
+        else
+            append_message "$chat_id" "assistant" "$content" "" "$tool_calls_json"
+        fi
+
+        # Execute each tool call
+        local tc_count i
+        tc_count=$(echo "$tool_calls_json" | jq 'length')
+        for (( i=0; i<tc_count; i++ )); do
+            local tc_id tc_name tc_args tool_result result_summary
+            tc_id=$(echo "$tool_calls_json" | jq -r ".[$i].id // empty")
+            tc_name=$(echo "$tool_calls_json" | jq -r ".[$i].function.name // empty")
+            tc_args=$(echo "$tool_calls_json" | jq -r ".[$i].function.arguments // empty")
+
+            tool_result=$(execute_tool_call "$tc_name" "$tc_args" 2>&1)
+            local result_lines
+            result_lines=$(echo "$tool_result" | wc -l)
+            if [[ $result_lines -le 1 ]]; then
+                result_summary="$(echo "$tool_result" | head -c 80 | tr '\n' ' ')"
+            else
+                result_summary="${result_lines} lines, $(echo "$tool_result" | wc -c) chars"
+            fi
+            printf "  ${C_DIM}[tool:%s → %s]${C_RESET}\n" "$tc_name" "$result_summary"
+
+            _append_tool_result_message "$chat_id" "$tc_id" "$tool_result"
+        done
+
+        # Redraw to show intermediate messages
+        draw_chat "$chat_id"
+    done
+
+    color_echo "$C_YELLOW" "Agent loop reached max turns ($max_turns). Stopping."
+    return 1
+}
+
+# chat_loop() — the main chat interaction loop
+chat_loop() {
+    local chat_id="$1"
+
+    # Verify chat exists
+    local file
+    file="$(chat_filepath "$chat_id")"
+    if [[ ! -f "$file" ]]; then
+        color_echo "$C_RED" "Chat not found: $chat_id"
+        printf "Press Enter to continue..."
+        read -r
+        return 1
+    fi
+
+    local input
+
+    while true; do
+        # Draw the full chat
+        draw_chat "$chat_id"
+
+        read -e -r -p $'\001\033[1m\002>\001\033[0m\002 ' input || exit 0
+
+        # Empty input — redraw
+        if [[ -z "$input" ]]; then
+            continue
+        fi
+
+        history -s "$input"
+        history -w
+
+        # ——— Slash commands ———
+        if [[ "$input" == /* ]]; then
+            case "$input" in
+                /help|/h)
+                    echo ""
+                    echo "  ${C_BOLD}Navigation${C_RESET}"
+                    echo "  /new             - Start a new chat"
+                    echo "  /resume          - Pick a previous chat"
+                    echo "  /settings        - Open settings"
+                    echo "  /quit, /exit, /q - Exit"
+                    echo ""
+                    echo "  ${C_BOLD}Chat${C_RESET}"
+                    echo "  /compose, /c     - Open editor to compose a multiline message"
+                    echo "  /thinking, /t    - Toggle thinking mode (OFF/HIGH)"
+                    echo "  /max             - Toggle max thinking mode"
+                    echo "  /showthinking    - Toggle display of thinking tokens"
+                    echo "  /system          - Edit the system message"
+                    echo "  /edit            - Edit last user message (or system prompt)"
+                    echo "  /editresponse    - Edit last assistant response"
+                    echo "  /retry           - Regenerate last assistant response"
+                    echo "  /undo            - Remove last exchange (user + assistant)"
+                    echo "  /rewind          - Truncate conversation to a chosen exchange"
+                    echo "  /fork            - Branch conversation from a chosen exchange"
+                    echo "  /delete          - Delete this chat"
+                    echo ""
+                    echo "  ${C_BOLD}Output${C_RESET}"
+                    echo "  /export          - Export chat as plain text"
+                    echo "  /copy            - Copy last assistant message to clipboard"
+                    echo "  /clear           - Redraw the screen"
+                    echo ""
+                    echo "  ${C_BOLD}API${C_RESET}"
+                    echo "  /apikey          - Set API key"
+                    echo "  /apibase         - Set API base URL"
+                    echo ""
+                    echo "  ${C_BOLD}Tools${C_RESET}"
+                    echo "  /tool            - List available tools (active ones marked *)"
+                    echo "  /tool <name>     - Toggle a tool on/off for this chat"
+                    echo "  /tool clear      - Disable all tools for this chat"
+                    echo ""
+                    echo "  /help, /h        - Show this help"
+                    echo ""
+                    printf "  Press Enter to continue..."
+                    read -r
+                    ;;
+                /thinking|/t)
+                    local current
+                    current=$(jq -r '.thinking // false' "$file")
+                    if [[ "$current" == "true" ]]; then
+                        set_chat_thinking "$chat_id" "false"
+                        echo ""
+                        echo "  ${C_GREEN}Thinking: OFF${C_RESET}"
+                    else
+                        set_chat_thinking "$chat_id" "true"
+                        echo ""
+                        echo "  ${C_GREEN}Thinking: HIGH${C_RESET}"
+                    fi
+                    sleep 0.5
+                    ;;
+                /max)
+                    local current
+                    current=$(jq -r '.thinking // false' "$file")
+                    if [[ "$current" == "max" ]]; then
+                        set_chat_thinking "$chat_id" "false"
+                        echo ""
+                        echo "  ${C_GREEN}Thinking: OFF${C_RESET}"
+                    else
+                        set_chat_thinking "$chat_id" "max"
+                        update_message "$chat_id" 0 "$_MAX_THINKING_SYSTEM_PROMPT"
+                        echo ""
+                        echo "  ${C_GREEN}Thinking: MAX${C_RESET}"
+                    fi
+                    sleep 0.5
+                    ;;
+
+                /compose|/c)
+                    local compose_tmpfile compose_input
+                    compose_tmpfile=$(mktemp --suffix=.txt)
+                    ${EDITOR_CMD:-vi} "$compose_tmpfile" 2>/dev/null || {
+                        rm -f "$compose_tmpfile"
+                        continue
+                    }
+                    compose_input=$(< "$compose_tmpfile")
+                    rm -f "$compose_tmpfile"
+                    if [[ -z "$compose_input" ]]; then
+                        continue
+                    fi
+
+                    local compose_count_before
+                    compose_count_before=$(jq '.messages | length' "$file")
+                    append_message "$chat_id" "user" "$compose_input"
+                    if [[ "$compose_count_before" == "1" ]]; then
+                        set_chat_title "$chat_id" "$(echo "$compose_input" | head -c 50)"
+                    fi
+
+                    draw_chat "$chat_id"
+
+                    local compose_tools
+                    compose_tools=$(get_active_tools_json "$chat_id")
+                    if [[ -n "$compose_tools" && "$compose_tools" != "[]" ]]; then
+                        agent_loop "$chat_id" || {
+                            echo ""
+                            color_echo "$C_RED" "Agent loop failed."
+                            printf "  Press Enter to continue..."
+                            read -r
+                        }
+                    else
+                        printf "${C_BOLD}${C_CYAN}[%s]${C_RESET}\n" "$default_model"
+                        local compose_messages compose_thinking compose_rc compose_result
+                        compose_messages=$(jq '.messages' "$file")
+                        compose_thinking=$(jq -r '.thinking // false' "$file")
+                        compose_rc=0
+                        call_llm_stream "$compose_messages" "$compose_thinking" "" || compose_rc=$?
+                        compose_result="$_LLM_RESULT"
+
+                        if [[ $compose_rc -ne 0 ]]; then
+                            echo ""
+                            color_echo "$C_RED" "API call failed. Check your API_KEY and network."
+                            printf "  Press Enter to continue..."
+                            read -r
+                        elif [[ -n "$compose_result" ]]; then
+                            store_assistant_result "$chat_id" "$compose_result"
+                        fi
+                    fi
+                    echo ""
+                    ;;
+                /clear)
+                    continue
+                    ;;
+                /export)
+                    echo ""
+                    draw_divider "━"
+                    local chat_json exp_msg_count i role content thinking tool_calls_exp
+                    chat_json=$(cat "$file")
+                    exp_msg_count=$(echo "$chat_json" | jq '.messages | length')
+                    for (( i=0; i<exp_msg_count; i++ )); do
+                        role=$(echo "$chat_json" | jq -r ".messages[$i].role")
+                        content=$(echo "$chat_json" | jq -r ".messages[$i].content // \"\"")
+                        thinking=$(echo "$chat_json" | jq -r ".messages[$i].thinking // \"\"")
+                        tool_calls_exp=$(echo "$chat_json" | jq -r ".messages[$i].tool_calls // empty" 2>/dev/null) || true
+                        case "$role" in
+                            system)
+                                echo "[System]"
+                                echo "$content"
+                                ;;
+                            user)
+                                echo "[You]"
+                                echo "$content"
+                                ;;
+                            assistant)
+                                echo "[Assistant]"
+                                if [[ -n "$thinking" ]]; then
+                                    echo "[Thinking: $thinking]"
+                                fi
+                                if [[ -n "$tool_calls_exp" && "$tool_calls_exp" != "null" ]]; then
+                                    local tc_names_exp
+                                    tc_names_exp=$(echo "$tool_calls_exp" | jq -r '.[].function.name' 2>/dev/null)
+                                    if [[ -n "$tc_names_exp" ]]; then
+                                        while IFS= read -r tce; do
+                                            echo "[Tool: $tce]"
+                                        done <<< "$tc_names_exp"
+                                    fi
+                                fi
+                                echo "$content"
+                                ;;
+                            tool)
+                                echo "[Tool result]"
+                                echo "$content"
+                                ;;
+                        esac
+                        echo ""
+                    done
+                    draw_divider "━"
+                    printf "Press Enter to continue..."
+                    read -r
+                    ;;
+                /system)
+                    local sys_content tmpfile new_sys
+                    sys_content=$(jq -r '.messages[0].content // ""' "$file")
+                    tmpfile=$(mktemp)
+                    echo "$sys_content" > "$tmpfile"
+
+                    echo ""
+                    echo "  Opening editor to edit system message..."
+                    ${EDITOR_CMD:-vi} "$tmpfile" 2>/dev/null || {
+                        color_echo "$C_RED" "Editor failed"
+                        rm -f "$tmpfile"
+                        printf "  Press Enter to continue..."
+                        read -r
+                        continue
+                    }
+
+                    new_sys=$(cat "$tmpfile")
+                    rm -f "$tmpfile"
+
+                    if [[ -n "$new_sys" && "$new_sys" != "$sys_content" ]]; then
+                        update_message "$chat_id" 0 "$new_sys"
+                        echo "  ${C_GREEN}System message updated.${C_RESET}"
+                        sleep 0.5
+                    fi
+                    ;;
+                /retry)
+                    msg_cnt=$(jq '.messages | length' "$file")
+                    if [[ $msg_cnt -le 2 ]]; then
+                        echo ""
+                        echo "  ${C_YELLOW}Nothing to retry${C_RESET}"
+                        sleep 0.5
+                        continue
+                    fi
+
+                    # Get the last user message content
+                    last_user_idx=$((msg_cnt - 2))
+                    last_user_content=$(jq -r ".messages[$last_user_idx].content // \"\"" "$file")
+
+                    # Remove last two messages (user + assistant)
+                    remove_messages_after "$chat_id" "$last_user_idx"
+
+                    # Re-append user message and re-send
+                    echo ""
+                    printf "${C_BOLD}${C_GREEN}[You]${C_RESET} %s\n" "$last_user_content"
+                    printf "${C_BOLD}${C_CYAN}[%s]${C_RESET}\n" "$default_model"
+
+                    append_message "$chat_id" "user" "$last_user_content"
+
+                    local retry_tools
+                    retry_tools=$(get_active_tools_json "$chat_id")
+                    if [[ -n "$retry_tools" && "$retry_tools" != "[]" ]]; then
+                        agent_loop "$chat_id" || true
+                    else
+                        messages_json=$(jq '.messages' "$file")
+                        thinking_enabled=$(jq -r '.thinking // false' "$file")
+
+                        call_llm_stream "$messages_json" "$thinking_enabled" "" || true
+                        result_json="$_LLM_RESULT"
+
+                        if [[ -n "$result_json" ]]; then
+                            store_assistant_result "$chat_id" "$result_json"
+                        fi
+                    fi
+                    echo ""
+                    ;;
+                /undo)
+                    msg_cnt=$(jq '.messages | length' "$file")
+                    if [[ $msg_cnt -le 2 ]]; then
+                        echo ""
+                        echo "  ${C_YELLOW}Nothing to undo${C_RESET}"
+                        sleep 0.5
+                        continue
+                    fi
+
+                    last_user_idx=$((msg_cnt - 2))
+                    remove_messages_after "$chat_id" "$last_user_idx"
+                    echo ""
+                    echo "  ${C_GREEN}Last exchange removed.${C_RESET}"
+                    sleep 0.5
+                    ;;
+                /rewind)
+                    local msg_cnt; msg_cnt=$(jq '.messages | length' "$file")
+                    local num_exchanges=$(( (msg_cnt - 1) / 2 ))
+                    if [[ $num_exchanges -lt 1 ]]; then
+                        echo ""; echo "  ${C_YELLOW}Nothing to rewind to${C_RESET}"; sleep 0.5; continue
+                    fi
+                    echo ""
+                    for (( e=1; e<=num_exchanges; e++ )); do
+                        local u_preview; u_preview=$(jq -r ".messages[$((2*e-1))].content" "$file" | head -c 60)
+                        printf "  ${C_BOLD}%d${C_RESET}. %s\n" "$e" "$u_preview"
+                    done
+                    echo ""
+                    printf "  Keep through exchange [1-%d] (Enter to cancel): " "$num_exchanges"
+                    local rw_pick; read -r rw_pick
+                    if [[ "$rw_pick" =~ ^[0-9]+$ && "$rw_pick" -ge 1 && "$rw_pick" -le "$num_exchanges" ]]; then
+                        remove_messages_after "$chat_id" $(( 2 * rw_pick + 1 ))
+                        echo "  ${C_GREEN}Rewound to exchange ${rw_pick}.${C_RESET}"; sleep 0.5
+                    fi
+                    ;;
+                /fork)
+                    local msg_cnt; msg_cnt=$(jq '.messages | length' "$file")
+                    local num_exchanges=$(( (msg_cnt - 1) / 2 ))
+                    if [[ $num_exchanges -lt 1 ]]; then
+                        echo ""; echo "  ${C_YELLOW}Nothing to fork from${C_RESET}"; sleep 0.5; continue
+                    fi
+                    echo ""
+                    for (( e=1; e<=num_exchanges; e++ )); do
+                        local u_preview; u_preview=$(jq -r ".messages[$((2*e-1))].content" "$file" | head -c 60)
+                        printf "  ${C_BOLD}%d${C_RESET}. %s\n" "$e" "$u_preview"
+                    done
+                    echo ""
+                    printf "  Fork after exchange [1-%d] (Enter to cancel): " "$num_exchanges"
+                    local fork_pick; read -r fork_pick
+                    if [[ "$fork_pick" =~ ^[0-9]+$ && "$fork_pick" -ge 1 && "$fork_pick" -le "$num_exchanges" ]]; then
+                        local fork_id; fork_id="$(date +%s%N 2>/dev/null || date +%s)$$"
+                        local fork_file; fork_file="$(chat_filepath "$fork_id")"
+                        jq --argjson end "$(( 2 * fork_pick + 1 ))" \
+                            '.messages = .messages[:$end] | .title = "Fork: " + .title' \
+                            "$file" > "$fork_file"
+                        echo "  ${C_GREEN}Forked. Entering new chat.${C_RESET}"; sleep 0.5
+                        chat_loop "$fork_id"
+                    fi
+                    ;;
+                /copy)
+                    msg_cnt=$(jq '.messages | length' "$file")
+                    found=0
+                    for (( copy_idx=msg_cnt-1; copy_idx>=0; copy_idx-- )); do
+                        copy_role=$(jq -r ".messages[$copy_idx].role // \"\"" "$file")
+                        if [[ "$copy_role" == "assistant" ]]; then
+                            copy_content=$(jq -r ".messages[$copy_idx].content // \"\"" "$file")
+                            found=1
+                            break
+                        fi
+                    done
+                    echo ""
+                    if [[ $found -eq 0 || -z "$copy_content" ]]; then
+                        echo "  ${C_YELLOW}Nothing to copy${C_RESET}"
+                    else
+                        if copy_to_clipboard "$copy_content"; then
+                            echo "  ${C_GREEN}Copied to clipboard.${C_RESET}"
+                        else
+                            echo "  ${C_RED}Failed to copy to clipboard.${C_RESET}"
+                        fi
+                    fi
+                    sleep 1
+                    ;;
+                /delete)
+                    echo ""
+                    printf "  ${C_RED}Delete this chat? (y/N):${C_RESET} "
+                    read -r confirm
+                    if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+                        delete_chat "$chat_id"
+                        echo "  ${C_GREEN}Chat deleted.${C_RESET}"
+                        sleep 0.5
+                        return 0
+                    else
+                        echo "  ${C_YELLOW}Canceled.${C_RESET}"
+                        sleep 0.5
+                    fi
+                    ;;
+                /apikey)
+                    echo ""
+                    printf "  Enter API Key: "
+                    read -s -r new_api_key
+                    echo ""
+                    if [[ -n "$new_api_key" ]]; then
+                        API_KEY="$new_api_key"
+                        save_config
+                        echo "  ${C_GREEN}API Key updated.${C_RESET}"
+                    else
+                        echo "  ${C_YELLOW}API Key unchanged.${C_RESET}"
+                    fi
+                    sleep 1
+                    ;;
+                /apibase)
+                    echo ""
+                    printf "  Enter API Base URL [${API_BASE}]: "
+                    read -r new_api_base
+                    if [[ -n "$new_api_base" ]]; then
+                        API_BASE="$new_api_base"
+                        save_config
+                        echo "  ${C_GREEN}API Base URL updated.${C_RESET}"
+                    else
+                        echo "  ${C_YELLOW}API Base URL unchanged.${C_RESET}"
+                    fi
+                    sleep 1
+                    ;;
+                /tool*)
+                    echo ""
+                    local tool_input
+                    tool_input="${input#/tool}"
+                    tool_input="${tool_input# }"
+                    # /tool (no args) — list tools
+                    if [[ -z "$tool_input" ]]; then
+                        echo "  ${C_BOLD}Available tools:${C_RESET}"
+                        local active_names
+                        active_names=$(jq -r '.active_tools // [] | join(" ")' "$file" 2>/dev/null)
+                        while IFS= read -r tname; do
+                            local is_active=" "
+                            for an in $active_names; do
+                                [[ "$an" == "$tname" ]] && is_active="*"
+                            done
+                            local tdesc
+                            tdesc=$(tool_description "$tname" 2>/dev/null)
+                            printf "  ${C_BOLD}%s${C_RESET} %s\n" "${is_active}${tname}" "$tdesc"
+                        done < <(list_tool_names)
+                        echo ""
+                        printf "  Press Enter to continue..."
+                        read -r
+                    elif [[ "$tool_input" == "clear" ]]; then
+                        set_active_tools "$chat_id"
+                        echo "  ${C_GREEN}All tools cleared.${C_RESET}"
+                        sleep 0.5
+                    else
+                        # Toggle a specific tool
+                        local tname="$tool_input"
+                        local schema
+                        schema=$(tool_schema "$tname" 2>/dev/null) || {
+                            echo "  ${C_RED}Unknown tool: $tname${C_RESET}"
+                            echo "  Use /tool to list available tools."
+                            sleep 1
+                            continue
+                        }
+                        local active_names
+                        active_names=$(jq -r '.active_tools // []' "$file" 2>/dev/null)
+                        local new_active=()
+                        local found=0
+                        for an in $(echo "$active_names" | jq -r '.[]' 2>/dev/null); do
+                            if [[ "$an" == "$tname" ]]; then
+                                found=1
+                            else
+                                new_active+=("$an")
+                            fi
+                        done
+                        if [[ $found -eq 1 ]]; then
+                            # Remove tool
+                            set_active_tools "$chat_id" "${new_active[@]}"
+                            echo "  ${C_GREEN}Removed tool: $tname${C_RESET}"
+                        else
+                            # Add tool
+                            new_active+=("$tname")
+                            set_active_tools "$chat_id" "${new_active[@]}"
+                            echo "  ${C_GREEN}Added tool: $tname${C_RESET}"
+                        fi
+                        sleep 0.5
+                    fi
+                    ;;
+                /quit|/exit|/q)
+                    exit 0
+                    ;;
+                /showthinking)
+                    if [[ "$show_thinking" == "true" ]]; then
+                        show_thinking="false"
+                        echo ""; echo "  ${C_GREEN}Thinking display: OFF${C_RESET}"
+                    else
+                        show_thinking="true"
+                        echo ""; echo "  ${C_GREEN}Thinking display: ON${C_RESET}"
+                    fi
+                    sleep 0.5
+                    ;;
+                /edit)
+                    local edit_idx edit_role tmpfile new_content old_content
+                    local msg_cnt_e; msg_cnt_e=$(jq '.messages | length' "$file")
+                    edit_idx=-1
+                    for (( ei=msg_cnt_e-1; ei>=0; ei-- )); do
+                        edit_role=$(jq -r ".messages[$ei].role" "$file")
+                        if [[ "$edit_role" == "user" ]]; then
+                            edit_idx=$ei; break
+                        fi
+                    done
+                    if [[ $edit_idx -eq -1 ]]; then
+                        edit_idx=0
+                    fi
+                    old_content=$(jq -r ".messages[$edit_idx].content // \"\"" "$file")
+                    tmpfile=$(mktemp)
+                    echo "$old_content" > "$tmpfile"
+                    ${EDITOR_CMD:-vi} "$tmpfile" 2>/dev/null || { rm -f "$tmpfile"; continue; }
+                    new_content=$(cat "$tmpfile"); rm -f "$tmpfile"
+                    if [[ -n "$new_content" && "$new_content" != "$old_content" ]]; then
+                        update_message "$chat_id" "$edit_idx" "$new_content"
+                        echo "  ${C_GREEN}Message updated.${C_RESET}"; sleep 0.5
+                    fi
+                    ;;
+                /editresponse)
+                    local er_idx er_role er_tmpfile er_old_content er_old_thinking
+                    local msg_cnt_r; msg_cnt_r=$(jq '.messages | length' "$file")
+                    er_idx=-1
+                    for (( ri=msg_cnt_r-1; ri>=0; ri-- )); do
+                        er_role=$(jq -r ".messages[$ri].role" "$file")
+                        if [[ "$er_role" == "assistant" ]]; then
+                            er_idx=$ri; break
+                        fi
+                    done
+                    if [[ $er_idx -eq -1 ]]; then
+                        echo ""; echo "  ${C_YELLOW}No assistant message to edit${C_RESET}"; sleep 0.5; continue
+                    fi
+                    er_old_thinking=$(jq -r ".messages[$er_idx].thinking // \"\"" "$file")
+                    er_old_content=$(jq -r ".messages[$er_idx].content // \"\"" "$file")
+                    er_tmpfile=$(mktemp)
+                    if [[ -n "$er_old_thinking" ]]; then
+                        printf '%s\n---THINKING---\n%s' "$er_old_content" "$er_old_thinking" > "$er_tmpfile"
+                    else
+                        printf '%s' "$er_old_content" > "$er_tmpfile"
+                    fi
+                    ${EDITOR_CMD:-vi} "$er_tmpfile" 2>/dev/null || { rm -f "$er_tmpfile"; continue; }
+                    local er_raw; er_raw=$(cat "$er_tmpfile"); rm -f "$er_tmpfile"
+                    local er_new_content er_new_thinking
+                    if [[ "$er_raw" == *$'\n---THINKING---\n'* ]]; then
+                        er_new_content="${er_raw%%$'\n---THINKING---\n'*}"
+                        er_new_thinking="${er_raw#*$'\n---THINKING---\n'}"
+                    else
+                        er_new_content="$er_raw"
+                        er_new_thinking="$er_old_thinking"
+                    fi
+                    local er_tmp; er_tmp="$(chat_filepath "$chat_id").tmp.$$"
+                    jq --argjson idx "$er_idx" \
+                       --rawfile content <(printf '%s' "$er_new_content") \
+                       --rawfile thinking <(printf '%s' "$er_new_thinking") \
+                       '.messages[$idx].content = $content | .messages[$idx].thinking = $thinking' \
+                       "$file" > "$er_tmp" && mv "$er_tmp" "$file"
+                    echo "  ${C_GREEN}Response updated.${C_RESET}"; sleep 0.5
+                    ;;
+                /new)
+                    local new_id
+                    new_id=$(create_chat "New Chat")
+                    chat_loop "$new_id"
+                    ;;
+                /resume)
+                    handle_resume_chat
+                    ;;
+                /settings)
+                    settings_loop
+                    ;;
+                *)
+                    echo ""
+                    echo "  ${C_RED}Unknown command: $input${C_RESET}  (type /help for help)"
+                    sleep 1
+                    ;;
+            esac
+            continue
+        fi
+
+        # ——— Regular message: send to LLM ———
+        # Check if this is the first user message (for auto-title)
+        local msg_count_before
+        msg_count_before=$(jq '.messages | length' "$file")
+
+        # Append user message
+        append_message "$chat_id" "user" "$input"
+
+        # Auto-title on first user message
+        if [[ "$msg_count_before" == "1" ]]; then
+            local auto_title
+            auto_title=$(echo "$input" | head -c 50)
+            set_chat_title "$chat_id" "$auto_title"
+        fi
+
+        # Redraw to show the new user message
+        draw_chat "$chat_id"
+
+        # Call the API (agent loop if tools active, otherwise simple call)
+        local tools_json
+        tools_json=$(get_active_tools_json "$chat_id")
+        if [[ -n "$tools_json" && "$tools_json" != "[]" ]]; then
+            agent_loop "$chat_id" || {
+                echo ""
+                color_echo "$C_RED" "Agent loop failed."
+                printf "  Press Enter to continue..."
+                read -r
+            }
+        else
+            messages_json=$(jq '.messages' "$file")
+            thinking_enabled=$(jq -r '.thinking // false' "$file")
+            printf "${C_BOLD}${C_CYAN}[%s]${C_RESET}\n" "$default_model"
+
+            call_rc=0
+            call_llm_stream "$messages_json" "$thinking_enabled" "" || call_rc=$?
+            result_json="$_LLM_RESULT"
+
+            if [[ $call_rc -ne 0 ]]; then
+                echo ""
+                color_echo "$C_RED" "API call failed. Check your API_KEY and network."
+                printf "  Press Enter to continue..."
+                read -r
+                echo ""
+                continue
+            fi
+
+            # Append assistant response
+            store_assistant_result "$chat_id" "$result_json"
+        fi
+
+        echo ""
+    done
+}
+
+# settings_loop() — configure defaults
+settings_loop() {
+    local choice think_label model_choice new_key new_base custom_model
+    while true; do
+        clear_screen
+        draw_header "Settings"
+        echo ""
+        if [[ "$default_thinking" == "max" ]]; then
+            think_label="MAX"
+        elif [[ "$default_thinking" == "true" ]]; then
+            think_label="HIGH"
+        else
+            think_label="OFF"
+        fi
+        echo "  1. Default Thinking: ${C_BOLD}${think_label}${C_RESET}"
+        echo "  2. Default Model: ${C_BOLD}${default_model}${C_RESET}"
+        echo "  3. Set API Key"
+        echo "  4. Set API Base URL"
+        echo "  5. Back"
+        echo ""
+        printf "Select [1-5]: "
+        read -r choice || { echo ""; break; }
+
+        case "$choice" in
+            1)
+                if [[ "$default_thinking" == "false" ]]; then
+                    default_thinking="true"
+                elif [[ "$default_thinking" == "true" ]]; then
+                    default_thinking="max"
+                else
+                    default_thinking="false"
+                fi
+                save_config
+                ;;
+            2)
+                echo ""
+                echo "  Available models:"
+                echo "    ${C_BOLD}1${C_RESET}. deepseek-v4-pro"
+                echo "    ${C_BOLD}2${C_RESET}. deepseek-reasoner"
+                echo "    ${C_BOLD}3${C_RESET}. gpt-4o"
+                echo "    ${C_BOLD}4${C_RESET}. gpt-4o-mini"
+                echo "    ${C_BOLD}5${C_RESET}. Custom..."
+                echo ""
+                printf "  Select model [1-5]: "
+                read -r model_choice
+                case "$model_choice" in
+                    1) default_model="deepseek-v4-pro" ;;
+                    2) default_model="deepseek-reasoner" ;;
+                    3) default_model="gpt-4o" ;;
+                    4) default_model="gpt-4o-mini" ;;
+                    5)
+                        echo ""
+                        printf "  Enter custom model name: "
+                        read -r custom_model
+                        if [[ -n "$custom_model" ]]; then
+                            default_model="$custom_model"
+                        fi
+                        ;;
+                    *) continue ;;
+                esac
+                save_config
+                ;;
+            3)
+                echo ""
+                echo "  Note: Set the LLM_DEEPSEEK_API_KEY env variable for persistence."
+                printf "  Or enter API Key here (saved to config): "
+                read -s -r new_key
+                echo ""
+                if [[ -n "$new_key" ]]; then
+                    API_KEY="$new_key"
+                    save_config
+                    echo "  ${C_GREEN}API Key saved.${C_RESET}"
+                fi
+                sleep 0.5
+                ;;
+            4)
+                echo ""
+                printf "  Enter API Base URL [${API_BASE}]: "
+                read -r new_base
+                if [[ -n "$new_base" ]]; then
+                    API_BASE="$new_base"
+                    save_config
+                    echo "  ${C_GREEN}API Base URL saved.${C_RESET}"
+                fi
+                sleep 0.5
+                ;;
+            5) return 0 ;;
+        esac
+    done
+}
+
+# -----------------------------------------------------------------------------
+# main() — TUI entry point
+# -----------------------------------------------------------------------------
+main() {
+    # Handle CLI flags before entering TUI
+    case "${1:-}" in
+        -h|--help|help)
+            echo "Usage: llm-tui.sh [OPTIONS]"
+            echo ""
+            echo "A terminal UI for interacting with LLM APIs."
+            echo ""
+            echo "Options:"
+            echo "  -h, --help     Show this help message and exit"
+            echo "  -v, --version  Show version information and exit"
+            echo ""
+            echo "Environment variables:"
+            echo "  LLM_DEEPSEEK_API_KEY  API key for authentication (required)"
+            echo "  API_BASE              API base URL (default: https://api.deepseek.com)"
+            echo "  MODEL                 Default model (default: deepseek-v4-pro)"
+            echo ""
+            exit 0
+            ;;
+        -v|--version)
+            echo "llm-tui.sh version 1.0.0"
+            exit 0
+            ;;
+    esac
+
+    check_dependencies
+    mkdir -p "$CHAT_DIR" "$CONFIG_DIR"
+    load_config
+    if [[ -z "$API_KEY" ]]; then
+        color_echo "$C_RED" "ERROR: LLM_DEEPSEEK_API_KEY is not set."
+        color_echo "$C_YELLOW" "Export it in your shell profile, or run:"
+        color_echo "$C_YELLOW" "  export LLM_DEEPSEEK_API_KEY=your-key-here"
+        exit 1
+    fi
+    detect_editor || true
+    find_clipboard_cmd || true
+
+    HISTFILE="$CONFIG_DIR/input_history"
+    history -r 2>/dev/null || true
+
+    # Trap EXIT for a friendly goodbye
+    trap 'echo ""; echo "Goodbye!"' EXIT
+    trap 'TERM_WIDTH=$(tput cols 2>/dev/null || echo 80); _RESIZE_FLAG=true' SIGWINCH
+
+    # Auto-start: resume most recent chat, or create a new one
+    local chat_list first_id start_id
+    chat_list=$(list_chats)
+    if [[ -n "$chat_list" ]]; then
+        first_id=$(echo "$chat_list" | head -1 | cut -d'|' -f1)
+        chat_loop "$first_id"
+    else
+        start_id=$(create_chat "New Chat")
+        chat_loop "$start_id"
+    fi
+}
+
+# If executed directly (not sourced), run main
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

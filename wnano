@@ -6,5 +6,6 @@
 # -S : softwrap (Automatically wrap lines too long to display.)
 # -a : atblanks (Softwrap at blanks, not in the middle of a word.)
 # -0 : interface hidden
+# -m : enables the mouse
 # This leaves just you and the (well-wrapped) text.
 nano -Sa0 "$@"
