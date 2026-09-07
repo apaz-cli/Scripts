@@ -1,5 +1,23 @@
 #!/bin/sh
 
+# Install a desktop launcher, with the MTGO favicon, on first run.
+desktop="$HOME/.local/share/applications/mtgo.desktop"
+icon="$HOME/.local/share/mtgo/mtgo.ico"
+if [ ! -f "$desktop" ]; then
+    mkdir -p "$(dirname "$icon")" "$(dirname "$desktop")"
+    [ -s "$icon" ] || wget -qO "$icon" https://www.mtgo.com/favicon.ico || echo "Warning: could not download MTGO icon" >&2
+    cat > "$desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Magic: The Gathering Online
+Exec=$(readlink -f "$0")
+Icon=$icon
+Terminal=false
+Categories=Game;CardGame;
+StartupWMClass=mtgo.exe
+EOF
+fi
+
 # Check if run-mtgo exists in /bin
 if [ ! -f /bin/run-mtgo ]; then
     echo "Downloading run-mtgo..."
