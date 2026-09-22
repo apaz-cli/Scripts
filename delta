@@ -1,0 +1,65 @@
+#!/bin/bash
+
+set -e
+
+# Locked delta version — change to pin a different release.
+# "latest" resolves via the GitHub API (once, then cached per-version).
+DELTA_VERSION="${DELTA_VERSION:-0.19.2}"
+
+if [ "$DELTA_VERSION" = "latest" ]; then
+    DELTA_VERSION="$(curl -fsSL https://api.github.com/repos/dandavison/delta/releases/latest \
+        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')"
+    [ -n "$DELTA_VERSION" ] || { echo "[delta] Could not resolve latest version." >&2; exit 1; }
+fi
+
+INSTALL_DIR="/tmp/delta-${DELTA_VERSION}"
+DELTA_BIN="${INSTALL_DIR}/delta"
+
+# ---------------------------------------------------------------------------
+# Download and extract the pre-built release tarball if not already cached
+# ---------------------------------------------------------------------------
+if [ ! -x "$DELTA_BIN" ]; then
+    echo "[delta] Downloading delta (${DELTA_VERSION})..." >&2
+
+    ARCH="$(uname -m)"   # x86_64 or aarch64
+    case "$(uname -s)" in
+        Linux)  TARGET="${ARCH}-unknown-linux-gnu" ;;
+        Darwin) TARGET="${ARCH}-apple-darwin" ;;
+        *)      echo "[delta] Unsupported OS: $(uname -s)" >&2; exit 1 ;;
+    esac
+
+    URL="https://github.com/dandavison/delta/releases/download/${DELTA_VERSION}/delta-${DELTA_VERSION}-${TARGET}.tar.gz"
+
+    TMP_DIR="$(mktemp -d "${INSTALL_DIR}.XXXXXX")"
+    trap 'rm -rf "$TMP_DIR"' EXIT
+    curl -fsSL "$URL" | tar -xz -C "$TMP_DIR" --strip-components=1
+
+    # Atomic-ish install so concurrent invocations don't race on a half-written dir.
+    rm -rf "$INSTALL_DIR"
+    mv "$TMP_DIR" "$INSTALL_DIR"
+    trap - EXIT
+    chmod +x "$DELTA_BIN"
+    echo "[delta] Done." >&2
+fi
+
+# ---------------------------------------------------------------------------
+# Default rendering flags. Override the whole set with DELTA_ARGS="...", or
+# append/override individual value options by passing them on the command line
+# (later args win). Boolean flags can only be dropped via DELTA_ARGS.
+# ---------------------------------------------------------------------------
+if [ -n "${DELTA_ARGS+x}" ]; then
+    # shellcheck disable=SC2086
+    set -- $DELTA_ARGS "$@"
+else
+    set -- --diff-so-fancy \
+           --side-by-side \
+           --wrap-max-lines unlimited \
+           --syntax-theme "1337" \
+           --wrap-right-prefix-symbol " " \
+           --wrap-left-symbol " " \
+           --wrap-right-symbol " " \
+           --wrap-right-percent .00001 \
+           "$@"
+fi
+
+exec "$DELTA_BIN" "$@"

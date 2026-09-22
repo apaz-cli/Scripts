@@ -11,7 +11,7 @@ MODEL_URL="https://huggingface.co/$MODEL_REPO/resolve/main/$MODEL_NAME?download=
 
 LLAMA_CPP_PORT="9878"
 
-REPO_PATH="/tmp/llama.cpp"
+REPO_PATH="$HOME/git/llama.cpp"
 REPO_URL="https://github.com/ggml-org/llama.cpp"
 
 ANY_BUILD=0

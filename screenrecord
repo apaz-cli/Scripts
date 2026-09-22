@@ -1,27 +1,151 @@
-#!/bin/sh
+#!/bin/bash
+#
+# Record one monitor (plus audio) to a timestamped mp4.
+#
+# Usage: screenrecord [options] [MONITOR]
+#
+# MONITOR is an xrandr output name (DP-0, HDMI-0, ...). Defaults to the
+# primary monitor. Geometry is looked up at runtime, so nothing here
+# hardcodes a resolution or an offset.
 
-# TODO: Check against "record" script.
+set -eu
 
-#ffmpeg -f x11grab -y \
-#  -framerate 10 \
-#  -s 3840x2160 \
-#  -i :0.0 -c:v libx264 \
-#  -preset superfast -crf 18 \
-#  "$(date +'%Y-%m-%d_%H-%M-%S').mp4"
+usage() {
+    cat <<EOF
+Usage: screenrecord [options] [MONITOR]
 
+  -l            list monitors and audio devices, then exit
+  -m            also record the microphone, mixed with desktop audio
+  -M            record ONLY the microphone (no desktop audio)
+  -n            no audio
+  -r FPS        framerate (default: $fps)
+  -o FILE       output file (default: <timestamp>.mp4)
+  -c ENCODER    video encoder (default: auto, prefers h264_nvenc)
+  -h            this help
 
-#ffmpeg -f x11grab -y \
-#  -framerate 10 -s 3840x2160 -i :0.0 \
-#  -f alsa -i hw:0 \
-#  -c:v libx264 -preset superfast -crf 18 \
-#  -c:a aac -b:a 128k \
-#  "$(date +'%Y-%m-%d_%H-%M-%S').mp4"
+Stop the recording with q or Ctrl-C.
+EOF
+}
 
-#!/bin/sh
+fps=30
+outfile=""
+encoder="auto"
+audio_mode="desktop"
 
-ffmpeg -f x11grab -y \
-  -framerate 10 -s 3840x2160 -i :0.0 \
-  -f pulse -i alsa_output.usb-Corsair_CORSAIR_VOID_ELITE_Wireless_Gaming_Dongle-00.analog-stereo.monitor \
-  -c:v libx264 -preset superfast -crf 18 \
-  -c:a aac -b:a 128k \
-  "$(date +'%Y-%m-%d_%H-%M-%S').mp4"
+# Geometry of MONITOR, as "WIDTHxHEIGHT+X+Y". No argument means the
+# primary monitor, which xrandr marks with a '*'.
+monitor_geometry() {
+    local want="${1:-}"
+    xrandr --listmonitors | awk -v want="$want" '
+        NR == 1 { next }
+        {
+            name = $2
+            marked = (name ~ /\*/)
+            sub(/^\+?\*?/, "", name)
+            # $3 is like 3840/598x2160/336+3840+0
+            if (match($3, /^([0-9]+)\/[0-9]+x([0-9]+)\/[0-9]+\+([0-9]+)\+([0-9]+)$/, g)) {
+                geom = g[1] "x" g[2] "+" g[3] "+" g[4]
+            } else next
+            if (want == "" ? marked : (name == want || $4 == want)) {
+                print geom
+                exit
+            }
+        }'
+}
+
+list_devices() {
+    echo "Monitors:"
+    xrandr --listmonitors | tail -n +2 | sed 's/^/  /'
+    echo
+    echo "Default sink (desktop audio):  $(pactl get-default-sink)"
+    echo "Default source (microphone):   $(pactl get-default-source)"
+}
+
+while getopts ":lmMnr:o:c:h" opt; do
+    case "$opt" in
+        l) list_devices; exit 0 ;;
+        m) audio_mode="both" ;;
+        M) audio_mode="mic" ;;
+        n) audio_mode="none" ;;
+        r) fps="$OPTARG" ;;
+        o) outfile="$OPTARG" ;;
+        c) encoder="$OPTARG" ;;
+        h) usage; exit 0 ;;
+        :) echo "screenrecord: -$OPTARG needs an argument" >&2; exit 1 ;;
+        \?) echo "screenrecord: unknown option -$OPTARG" >&2; usage >&2; exit 1 ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+monitor="${1:-}"
+geom="$(monitor_geometry "$monitor")"
+if [ -z "$geom" ]; then
+    echo "screenrecord: no monitor named '${monitor}'." >&2
+    echo >&2
+    list_devices >&2
+    exit 1
+fi
+
+size="${geom%%+*}"
+offset="${geom#*+}"           # X+Y
+width="${size%x*}"
+height="${size#*x}"
+
+# libx264 and yuv420p both want even dimensions.
+width=$((width - width % 2))
+height=$((height - height % 2))
+
+# NVENC keeps the CPU free at 4K; fall back to x264 if it is missing.
+if [ "$encoder" = auto ]; then
+    if ffmpeg -hide_banner -encoders 2>/dev/null | grep -q h264_nvenc; then
+        encoder=h264_nvenc
+    else
+        encoder=libx264
+    fi
+fi
+
+case "$encoder" in
+    *nvenc) vopts=(-c:v "$encoder" -preset p4 -rc vbr -cq 23 -b:v 0) ;;
+    *)      vopts=(-c:v "$encoder" -preset ultrafast -crf 18) ;;
+esac
+
+# Pulse sinks expose what they are playing as a source named "<sink>.monitor";
+# that is how we capture desktop audio rather than the mic.
+sink_monitor="$(pactl get-default-sink).monitor"
+mic="$(pactl get-default-source)"
+
+ainputs=()
+amap=()
+case "$audio_mode" in
+    desktop)
+        ainputs=(-f pulse -thread_queue_size 1024 -i "$sink_monitor")
+        amap=(-map 0:v -map 1:a -c:a aac -b:a 128k)
+        ;;
+    mic)
+        ainputs=(-f pulse -thread_queue_size 1024 -i "$mic")
+        amap=(-map 0:v -map 1:a -c:a aac -b:a 128k)
+        ;;
+    both)
+        ainputs=(-f pulse -thread_queue_size 1024 -i "$sink_monitor"
+                 -f pulse -thread_queue_size 1024 -i "$mic")
+        amap=(-filter_complex "[1:a][2:a]amix=inputs=2:duration=first[a]"
+              -map 0:v -map "[a]" -c:a aac -b:a 128k)
+        ;;
+    none)
+        amap=(-map 0:v -an)
+        ;;
+esac
+
+: "${outfile:=$(date +'%Y-%m-%d_%H-%M-%S').mp4}"
+
+echo "Recording ${monitor:-primary} (${width}x${height} at +${offset//+/,}) at ${fps}fps"
+echo "  video: $encoder   audio: $audio_mode"
+echo "  -> $outfile"
+
+exec ffmpeg -hide_banner -y \
+    -f x11grab -thread_queue_size 1024 -framerate "$fps" -video_size "${width}x${height}" \
+    -i "${DISPLAY:-:0}+${offset//+/,}" \
+    "${ainputs[@]}" \
+    "${vopts[@]}" -pix_fmt yuv420p \
+    "${amap[@]}" \
+    "$outfile"
