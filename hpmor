@@ -1,0 +1,712 @@
+#!/bin/sh
+# Harry Potter and the Methods of Rationality, in less, resumable.
+#
+# The first run downloads the LaTeX source from github.com/rrthomas/hpmor and
+# renders it to formatted text under ~/.local/state/hpmor, so do that before
+# you lose the network. After that it works offline.
+#
+# Quitting with q, Q or ZZ saves the paragraph you were on, using the same
+# trick as `taoteching`: a lesskey binding runs less's `visual` action first,
+# and LESSEDIT redefines "invoke the editor" as "look up the top line's
+# paragraph number and write it down".
+#
+#   hpmor              resume where you left off
+#   hpmor 42           jump to chapter 42
+#
+# The text is wrapped to fit the terminal (72 columns in an 80-column one),
+# at least 40 columns; HPMOR_WIDTH overrides that. Each new width is
+# rendered once (a couple of seconds) and cached. The position is saved as a
+# paragraph number, so it doesn't depend on the width. Resizing while reading
+# doesn't reflow: quit and rerun.
+#
+# Inside less: /Chapter 42  finds a chapter, n/N for next/previous match.
+set -eu
+
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/hpmor"
+mkdir -p "$state_dir"
+cols=$(stty size < /dev/tty 2>/dev/null | cut -d' ' -f2) || true
+case $cols in '' | 0 | *[!0-9]*) cols=$(tput cols 2>/dev/null || echo "${COLUMNS:-80}") ;; esac
+width="${HPMOR_WIDTH:-$((cols - 8))}"
+[ "$width" -ge 40 ] || width=40
+src="$state_dir/src"
+text="$state_dir/text.$width"
+index="$state_dir/index.$width"
+export HPMOR_PARAS="$state_dir/paras.$width"
+keys="$state_dir/lesskey"
+export HPMOR_STATE="$state_dir/pos"
+
+fetch() {
+    echo "Downloading HPMOR source..." >&2
+    rm -rf "$src.tmp"
+    mkdir -p "$src.tmp"
+    curl -fsSL https://codeload.github.com/rrthomas/hpmor/tar.gz/HEAD |
+        tar -xz -C "$src.tmp" --strip-components=1 --wildcards \
+            '*/hpmor.tex' '*/chapters/*.tex'
+    rm -rf "$src"
+    mv "$src.tmp" "$src"
+}
+
+render() {
+    echo "Rendering..." >&2
+    python3 - "$src" "$width" "$text.tmp" "$index.tmp" "$HPMOR_PARAS.tmp" <<'PYEOF'
+import re, sys, textwrap
+
+src, width, out_path, idx_path, paras_path = sys.argv[1:]
+width = int(width)
+MARGIN = "   "
+
+# Private-use markers. Conversion emits these; layout turns them into
+# paragraphs, line breaks and ANSI styles.
+PAR, BR = "\ue000", "\ue001"
+EMPH, ITAL, BOLD, UL, GREEN, STRIKE, CYAN, POP = (chr(0xE010 + i) for i in range(8))
+PUSHES = EMPH + ITAL + BOLD + UL + GREEN + STRIKE + CYAN
+# Paragraph-style prefixes, stackable: indent, center, verse (keep line
+# breaks), bullet, hanging indent, chapter heading, part heading, rule.
+S_IND, S_CEN, S_VERSE, S_BUL, S_HANG, S_CHAP, S_PART, S_RULE = (chr(0xE020 + i) for i in range(8))
+STYLES = S_IND + S_CEN + S_VERSE + S_BUL + S_HANG + S_CHAP + S_PART + S_RULE
+NBSP = "\u00a0"
+
+
+def wrap(style, s):
+    return style + s + POP
+
+
+SPECIAL = re.compile(r"[{}~$\\`'-]")
+CMD = re.compile(r"\\([A-Za-z]+\*?|.)")
+
+
+class Conv:
+    def __init__(self):
+        self.chapter = 0
+        self.appendix = False
+        self.writtennote = 0
+
+    # --- helpers over the source string ------------------------------------
+
+    @staticmethod
+    def group(s, i, o="{", c="}"):
+        """s[i] == o; return (content, index after matching close)."""
+        depth, j = 0, i
+        while j < len(s):
+            ch = s[j]
+            if ch == "\\":
+                j += 2
+                continue
+            if ch == o:
+                depth += 1
+            elif ch == c:
+                depth -= 1
+                if depth == 0:
+                    return s[i + 1:j], j + 1
+            j += 1
+        return s[i + 1:], len(s)
+
+    def args(self, s, i, n, opt=0):
+        """Parse `opt` optional [..] args then `n` mandatory {..} args."""
+        opts, reqs = [], []
+        for _ in range(opt):
+            k = i
+            while k < len(s) and s[k] == " ":
+                k += 1
+            if k < len(s) and s[k] == "[":
+                a, i = self.group(s, k, "[", "]")
+                opts.append(a)
+            else:
+                opts.append(None)
+        for _ in range(n):
+            k = i
+            while k < len(s) and s[k] in " \n":
+                k += 1
+            if k < len(s) and s[k] == "{":
+                a, i = self.group(s, k)
+            elif k < len(s) and s[k] == "\\":
+                m = re.match(r"\\[A-Za-z]+|\\.", s[k:])
+                a, i = m.group(0), k + len(m.group(0))
+            elif k < len(s):
+                a, i = s[k], k + 1
+            else:
+                a = ""
+            reqs.append(a)
+        return opts, reqs, i
+
+    def env_body(self, s, i, name):
+        pat = re.compile(r"\\(begin|end)\{" + re.escape(name) + r"\}")
+        depth = 1
+        for m in pat.finditer(s, i):
+            depth += 1 if m.group(1) == "begin" else -1
+            if depth == 0:
+                return s[i:m.start()], m.end()
+        return s[i:], len(s)
+
+    @staticmethod
+    def skip_dimen(s, i):
+        m = re.match(r"\s*\*?\s*(\{[^}]*\}|[-+]?[\d.]*\s*(\\[A-Za-z]+|[a-z]{2})"
+                     r"(\s*(plus|minus)\s*[-+]?[\d.]*\s*(\\[A-Za-z]+|[a-z]{2}))*)", s[i:])
+        return i + m.end() if m else i
+
+    # --- headings ----------------------------------------------------------
+
+    def chapter_heading(self, title, starred):
+        title = self.conv(title).replace(BR, " ")
+        if starred:
+            label = ""
+        else:
+            self.chapter += 1
+            label = ("Appendix " + "ABCDEFGHIJ"[self.chapter - 1]) if self.appendix \
+                else "Chapter %d" % self.chapter
+        return PAR + S_CHAP + label + "\t" + title + PAR
+
+    def section(self, title):
+        return PAR + S_CEN + wrap(BOLD, self.conv(title)) + PAR
+
+    # --- main conversion ---------------------------------------------------
+
+    def conv(self, s):
+        out, i, n = [], 0, len(s)
+        while i < n:
+            m = SPECIAL.search(s, i)
+            if not m:
+                out.append(s[i:])
+                break
+            if m.start() > i:
+                out.append(s[i:m.start()])
+                i = m.start()
+            ch = s[i]
+            if ch == "{":
+                g, i = self.group(s, i)
+                out.append(self.conv(g))
+                continue
+            if ch == "}":
+                i += 1
+                continue
+            if ch == "~":
+                out.append(NBSP)
+                i += 1
+                continue
+            if ch == "$":
+                j = s.find("$", i + 1)
+                j = n if j < 0 else j
+                out.append(self.conv(s[i + 1:j].replace("\\times", "×")))
+                i = j + 1
+                continue
+            if ch == "-" and s.startswith("---", i):
+                out.append("—"); i += 3; continue
+            if ch == "-" and s.startswith("--", i):
+                out.append("–"); i += 2; continue
+            if ch == "`" and s.startswith("``", i):
+                out.append("“"); i += 2; continue
+            if ch == "'" and s.startswith("''", i):
+                out.append("”"); i += 2; continue
+            if ch != "\\":
+                out.append(ch)
+                i += 1
+                continue
+
+            m = CMD.match(s, i)
+            cmd = m.group(1)
+            i += len(m.group(0))
+            r, i = self.command(cmd, s, i)
+            out.append(r)
+        return "".join(out)
+
+    def command(self, cmd, s, i):
+        A = self.args
+        # Escapes and spacing.
+        if cmd in "%&$#_{}":
+            return cmd, i
+        if cmd in (",", " ", ";", ":", "/", "@", "-", "!"):
+            return (" " if cmd in " ;:" else ""), i
+        if cmd == "\\":
+            k = i
+            if k < len(s) and s[k] == "*":
+                k += 1
+            if k < len(s) and s[k] == "[":
+                _, k = self.group(s, k, "[", "]")
+            return BR, k
+        if cmd in ("hyp",):
+            return "-", i
+        if cmd == "emdashhyp":
+            return "—", i
+        if cmd == "am":
+            return NBSP + "a.m.", i
+        if cmd == "pm":
+            return NBSP + "p.m.", i
+        if cmd == "SPHEW":
+            return "SPHEW", i
+        if cmd == "ldots":
+            return "…", i
+        if cmd == "times":
+            return "×", i
+        if cmd in ("par", "linebreak", "newline"):
+            if cmd == "linebreak" and i < len(s) and s[i] == "[":
+                _, i = self.group(s, i, "[", "]")
+            return (PAR if cmd == "par" else BR), i
+
+        # Structure.
+        if cmd in ("chapter", "chapter*"):
+            (o1, o2), (t,), i = A(s, i, 1, 2)
+            return self.chapter_heading(t, cmd.endswith("*")), i
+        if cmd == "partchapter":
+            _, (a, b), i = A(s, i, 2, 1)
+            return self.chapter_heading(a + ", Part " + b, False), i
+        if cmd == "namedpartchapter":
+            _, (a, _abbr, b, c), i = A(s, i, 4, 1)
+            return self.chapter_heading(a + ", Part " + b + ": " + c, False), i
+        if cmd in ("section", "section*", "subsection", "subsection*"):
+            _, (t,), i = A(s, i, 1, 1)
+            return self.section(t), i
+        if cmd == "latersection":
+            _, (t,), i = A(s, i, 1)
+            return PAR + S_RULE + PAR + self.section(t), i
+        if cmd == "later":
+            return PAR + S_RULE + PAR, i
+        if cmd in ("OmakeIVsection", "OmakeIVspecialsection"):
+            _, (t,), i = A(s, i, 1, 1)
+            return PAR + S_CEN + wrap(BOLD, self.conv(t).upper()) + PAR, i
+        if cmd == "begin":
+            _, (env,), i = A(s, i, 1)
+            body, i = self.env_body(s, i, env)
+            return self.environment(env, body), i
+        if cmd == "item":
+            if i < len(s) and s[i] == "[":
+                _, i = self.group(s, i, "[", "]")
+            return PAR + S_BUL, i
+
+        # Inline styles.
+        if cmd in ("emph", "textit", "uline", "underline", "textbf", "textsc",
+                   "shout", "prophesy", "scream", "parsel", "sout", "censor",
+                   "abbrev", "MakeUppercase", "inlineheadline", "newspaperName"):
+            _, (t,), i = A(s, i, 1)
+            t = self.conv(t)
+            if cmd == "emph":
+                return wrap(UL if self.writtennote else EMPH, t), i
+            if cmd == "textit":
+                return wrap(ITAL, t), i
+            if cmd in ("uline", "underline"):
+                return wrap(UL, t), i
+            if cmd in ("textbf", "textsc", "shout", "prophesy", "inlineheadline"):
+                return wrap(BOLD, t), i
+            if cmd == "scream":
+                return wrap(BOLD, t.upper()), i
+            if cmd == "parsel":
+                return wrap(GREEN, t), i
+            if cmd in ("sout", "censor"):
+                return wrap(STRIKE, t), i
+            if cmd in ("abbrev", "MakeUppercase"):
+                return t.upper(), i
+            if cmd == "newspaperName":
+                return wrap(ITAL, t), i
+        if cmd in ("itshape", "em"):
+            return wrap(ITAL, self.conv(s[i:])), len(s)
+        if cmd in ("scshape", "bfseries"):
+            return wrap(BOLD, self.conv(s[i:])), len(s)
+
+        # Drop capitals.
+        if cmd in ("lettrine", "lettrinepara", "hplettrineextrapara"):
+            _, (a, b), i = A(s, i, 2, 1)
+            return wrap(BOLD, self.conv(a) + self.conv(b)), i
+
+        # Headlines, letters, misc boxes.
+        if cmd == "headline":
+            _, (t,), i = A(s, i, 1)
+            return self.environment("center", "\\textsc{" + t + "}"), i
+        if cmd == "McGonagallWhiteBoard":
+            _, (t,), i = A(s, i, 1)
+            return self.environment("center", "\\MakeUppercase{" + t + "}"), i
+        if cmd == "letterAddress":
+            _, (t,), i = A(s, i, 1)
+            return self.conv(t) + PAR, i
+        if cmd == "letterClosing":
+            _, (a, b), i = A(s, i, 2, 1)
+            return PAR + S_VERSE + self.conv(b) + PAR, i
+        if cmd in ("newspaperHeader", "mbox", "text", "hbox", "texorpdfstring"):
+            _, (t,), i = A(s, i, 1)
+            return self.conv(t), i
+        if cmd in ("scalebox", "raisebox", "resizebox"):
+            _, (_x, t), i = A(s, i, 2, 1)
+            return self.conv(t), i
+        if cmd == "parbox":
+            _, (_w, t), i = A(s, i, 2, 3)
+            return self.conv(t), i
+        if cmd == "href":
+            _, (_u, t), i = A(s, i, 2)
+            return self.conv(t), i
+        if cmd == "url":
+            _, (u,), i = A(s, i, 1)
+            return u, i
+        if cmd == "footnotetext":
+            _, (t,), i = A(s, i, 1, 1)
+            return " [" + self.conv(t) + "]", i
+        if cmd == "includegraphics":
+            _, _, i = A(s, i, 1, 1)
+            return "[image]", i
+
+        # Things that print nothing, with their arguments.
+        drop_args = {
+            "authorsnotetext": 1, "fontspec": 1, "setlength": 2, "settowidth": 2,
+            "setcounter": 2, "newsavebox": 1, "label": 1, "vspace": 1, "vspace*": 1,
+            "hspace": 1, "hspace*": 1, "rule": 2, "newcommand": 1, "renewcommand": 1,
+            "pagebreak": 0, "nopagebreak": 0, "penalty": 0, "noindent": 0,
+            "clearpage": 0, "newpage": 0, "centering": 0, "hfill": 0, "fill": 0,
+            "footnotemark": 0, "authorsnotefootnotemark": 0, "protect": 0,
+            "makeatletter": 0, "makeatother": 0, "nointerlineskip": 0,
+            "savetrivseps": 0, "restoretrivseps": 0, "firmlist": 0, "upshape": 0,
+            "normalsize": 0, "small": 0, "large": 0, "Large": 0, "huge": 0, "Huge": 0,
+            "footnotesize": 0, "scriptsize": 0, "tiny": 0, "relax": 0, "strut": 0,
+            "hfil": 0, "nonzeroparskip": 0, "leavevmode": 0, "xspace": 0,
+        }
+        if cmd in ("newcommand", "renewcommand"):
+            # \newcommand{\foo}[n][default]{body}: skip the whole definition.
+            _, _, i = A(s, i, 1)
+            while i < len(s) and s[i] in " [":
+                if s[i] == "[":
+                    _, i = self.group(s, i, "[", "]")
+                else:
+                    i += 1
+            _, _, i = A(s, i, 1)
+            return "", i
+        if cmd in drop_args:
+            if cmd in ("pagebreak", "nopagebreak") and i < len(s) and s[i] == "[":
+                _, i = self.group(s, i, "[", "]")
+            if cmd in ("vspace", "vspace*", "hspace", "hspace*"):
+                _, _, i = A(s, i, 1)
+                return "", i
+            _, _, i = A(s, i, drop_args[cmd], 1 if cmd in ("rule", "footnotemark") else 0)
+            return "", i
+        if cmd in ("vskip", "hskip", "kern", "baselineskip", "parindent", "parskip",
+                   "textheight", "textwidth", "versewidth", "leftmargin",
+                   "rightmargin", "topsep", "partopsep", "itemsep"):
+            k = i
+            while k < len(s) and s[k] == " ":
+                k += 1
+            if k < len(s) and s[k] == "=":
+                k += 1
+            return "", self.skip_dimen(s, k) if cmd in ("vskip", "hskip", "kern") or s[i:k].strip() == "=" else i
+
+        # Unknown: keep a following {group} if present, drop the command.
+        return "", i
+
+    def environment(self, env, body):
+        c = self.conv
+        if env == "chapterOpeningAuthorNote" or env == "comment":
+            return ""
+        if env in ("em", "emph"):
+            return wrap(EMPH, c(body))
+        if env == "chapterOpeningQuote":
+            return PAR + self.prefix(S_IND, wrap(ITAL, c(body))) + PAR
+        if env == "writtenNote":
+            self.writtennote += 1
+            r = c(body)
+            self.writtennote -= 1
+            return PAR + self.prefix(S_IND, wrap(ITAL, r)) + PAR
+        if env in ("center", "centering", "headlines"):
+            r = c(body)
+            if env == "headlines":
+                r = wrap(BOLD, r)
+            return PAR + self.prefix(S_CEN + S_VERSE, r) + PAR
+        if env == "verse":
+            return PAR + self.prefix(S_IND + S_VERSE, c(body)) + PAR
+        if env == "playdialog":
+            return PAR + self.prefix(S_HANG, c(body)) + PAR
+        if env in ("itemize", "enumerate"):
+            r = c(body)
+            if env == "enumerate":
+                parts, k = r.split(PAR + S_BUL), 0
+                r = parts[0]
+                for p in parts[1:]:
+                    k += 1
+                    r += PAR + S_BUL + "%d." % k + NBSP + p
+            return PAR + self.prefix(S_IND, r) + PAR
+        if env == "tabular":
+            body = re.sub(r"^\s*\{[^}]*\}", "", body)
+            rows = [[c(cell).strip() for cell in row.split("&")]
+                    for row in re.split(r"\\\\", body) if row.strip()]
+            w = max(len(vis(r[0])) for r in rows)
+            lines = [" " * (w - len(vis(r[0]))) + r[0] + "  " + "  ".join(r[1:])
+                     for r in rows]
+            return PAR + S_IND + S_VERSE + BR.join(l.replace(" ", NBSP) for l in lines) + PAR
+        return c(body)
+
+    @staticmethod
+    def prefix(style, r):
+        """Apply a paragraph style to every paragraph in r."""
+        return PAR.join(style + p if p.strip() else p for p in r.split(PAR))
+
+
+MARK_RE = re.compile("[\ue000-\ue0ff]")
+
+
+def vis(s):
+    return MARK_RE.sub("", s)
+
+
+SGR = {EMPH: None, ITAL: "3", BOLD: "1", UL: "4", GREEN: "32", STRIKE: "9", CYAN: "36"}
+
+
+class Layout:
+    def __init__(self):
+        self.stack = []
+        self.lines = []
+        self.index = []
+
+    def sgr(self):
+        codes, italic = [], False
+        for m in self.stack:
+            if m == EMPH:
+                italic = not italic
+            elif m == ITAL:
+                italic = True
+            else:
+                codes.append(SGR[m])
+        if italic:
+            codes.append("3")
+        return "\033[" + ";".join(sorted(set(codes))) + "m" if codes else ""
+
+    def styled(self, s):
+        """Render markers in s to ANSI, carrying the style stack across lines."""
+        if not self.stack and not MARK_RE.search(s):
+            return s.replace(NBSP, " ").rstrip()
+        out = [self.sgr()]
+        for ch in s:
+            if ch in PUSHES:
+                self.stack.append(ch)
+                out.append("\033[0m" + self.sgr())
+            elif ch == POP:
+                if self.stack:
+                    self.stack.pop()
+                out.append("\033[0m" + self.sgr())
+            else:
+                out.append(" " if ch == NBSP else ch)
+        r = "".join(out)
+        if self.stack or "\033" in r:
+            r += "\033[0m"
+        return r.rstrip() if not self.stack else r
+
+    def emit(self, s=""):
+        self.lines.append(s)
+
+    def blank(self):
+        if self.lines and self.lines[-1] != "":
+            self.emit()
+
+    def wrap_words(self, s, w, first="", rest=""):
+        # Break at spaces, after em-dashes, and inside hyphenated words too
+        # long for a line. Markers on otherwise-empty words ride along with
+        # the next word.
+        lines, cur, curlen, empty = [], [first], len(first), True
+        pending = ""
+        # vis() leaves spaces alone, so the stripped words line up.
+        for word, v in zip(s.split(" "), vis(s).split(" ")):
+            if not v:
+                pending += word
+                continue
+            if pending:
+                word, pending = pending + word, ""
+            if "—" in v or len(v) > w:
+                parts = self.split_word(word, v, w)
+            else:
+                parts = ((word, len(v)),)
+            sep = 1
+            for x, l in parts:
+                if not empty and curlen + sep + l > w:
+                    lines.append("".join(cur))
+                    cur, curlen, empty = [rest], len(rest), True
+                if not empty and sep:
+                    cur.append(" ")
+                    curlen += 1
+                cur.append(x)
+                curlen += l
+                empty, sep = False, 0
+        cur.append(pending)
+        lines.append("".join(cur))
+        return lines
+
+    @staticmethod
+    def split_word(word, v, w):
+        brk = "(?<=—)(?=\\S)" + ("|(?<=\\w-)(?=\\w)" if len(v) > w else "")
+        parts = []
+        for x in re.split(brk, word):
+            while len(vis(x)) > w:
+                k = n = 0
+                while n < w - 1:
+                    n += not MARK_RE.match(x[k])
+                    k += 1
+                parts.append(x[:k] + "-")
+                x = x[k:]
+            parts.append(x)
+        return [(x, len(vis(x))) for x in parts]
+
+    def para(self, p):
+        styles = ""
+        while p and p[0] in STYLES:
+            styles += p[0]
+            p = p[1:]
+        if S_RULE in styles:
+            self.blank()
+            self.emit(MARGIN + "*   *   *".center(width).rstrip())
+            self.emit()
+            return
+        if S_CHAP in styles:
+            label, _, title = p.partition("\t")
+            title = vis(title).replace(NBSP, " ").strip()
+            self.blank()
+            self.emit()
+            self.index.append((label, len(self.lines) + 1, title))
+            rule = "─" * min(width, max(len(label), len(title)) + 8)
+            for l in [rule] + ([label] if label else []) + \
+                    textwrap.wrap(title, width - 4) + [rule]:
+                self.emit(MARGIN + "\033[1;36m" + l.center(width).rstrip() + "\033[0m")
+            self.emit()
+            return
+        if S_PART in styles:
+            self.blank()
+            for _ in range(3):
+                self.emit()
+            self.index.append(("Part", len(self.lines) + 1, vis(p)))
+            rule = "═" * width
+            self.emit(MARGIN + "\033[1;35m" + rule + "\033[0m")
+            for l in textwrap.wrap(vis(p), width - 4):
+                self.emit(MARGIN + "\033[1;35m" + l.center(width).rstrip() + "\033[0m")
+            self.emit(MARGIN + "\033[1;35m" + rule + "\033[0m")
+            self.emit()
+            return
+
+        ind = 4 * styles.count(S_IND)
+        w = width - ind - (ind if S_IND in styles else 0)
+        first = rest = ""
+        if S_BUL in styles:
+            if not re.match(r"\d+\.", vis(p)):
+                first = "•" + NBSP
+            rest = "  "
+        if S_HANG in styles:
+            rest = "    "
+        src_lines = p.split(BR) if S_VERSE in styles else [p]
+        out = []
+        for sl in src_lines:
+            sl = sl.strip(" ")
+            if S_VERSE in styles:
+                if first:
+                    sl = first + sl
+                    first = ""
+                out.extend(self.wrap_words(sl, w, "", "  ") if vis(sl) else [""])
+            else:
+                for piece in sl.split(BR):
+                    piece = piece.strip(" ")
+                    out.extend(self.wrap_words(piece, w, first, rest))
+                    first = rest
+        # Trim leading/trailing empty lines.
+        while out and not vis(out[0]).strip():
+            if not any(c in PUSHES + POP for c in out[0]):
+                out.pop(0)
+            else:
+                break
+        if not out:
+            return
+        self.blank()
+        for l in out:
+            v = len(vis(l))
+            pad = MARGIN + " " * ind
+            if S_CEN in styles:
+                pad = MARGIN + " " * (ind + max(0, (w - v) // 2))
+            self.emit((pad + self.styled(l)) if v else self.styled(l).strip())
+
+
+def strip_comments(t):
+    return re.sub(r"(?<!\\)%.*", "", t)
+
+
+def read(name):
+    with open("%s/%s.tex" % (src, name), encoding="utf-8") as f:
+        return strip_comments(f.read())
+
+
+def main():
+    conv = Conv()
+    doc = []
+    master = read("hpmor")
+    for m in re.finditer(r"\\(include|part|setcounter|appendix)\b(\{([^}]*)\}(\{(\d+)\})?)?", master):
+        kind, arg = m.group(1), m.group(3)
+        if kind == "include" and arg.startswith("chapters/"):
+            t = read(arg)
+            t = re.sub(r"\n[ \t]*\n\s*", "\n" + PAR + "\n", t)
+            t = re.sub(r"\s+", " ", t)
+            doc.append(conv.conv(t))
+        elif kind == "part":
+            doc.append(PAR + S_PART + arg + PAR)
+        elif kind == "setcounter" and arg == "chapter":
+            conv.chapter = int(m.group(5))
+        elif kind == "appendix":
+            conv.appendix, conv.chapter = True, 0
+            doc.append(PAR + S_PART + "Appendices" + PAR)
+
+    lay, paras = Layout(), []
+    lay.emit()
+    for l in ["HARRY POTTER", "AND THE METHODS OF RATIONALITY", "", "Eliezer Yudkowsky"]:
+        lay.emit(MARGIN + "\033[1m" + l.center(width).rstrip() + "\033[0m" if l else "")
+    lay.emit()
+    for p in "".join(doc).split(PAR):
+        if vis(p).strip() or S_RULE in p:
+            # Record the first line of every paragraph that prints anything.
+            # Which ones do doesn't depend on the width, so the numbering
+            # is the same in every render.
+            n = len(lay.lines)
+            lay.para(p)
+            for k in range(n, len(lay.lines)):
+                if lay.lines[k]:
+                    paras.append(k + 1)
+                    break
+        else:
+            lay.styled(p)  # keep the style stack in step
+    lay.emit()
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lay.lines) + "\n")
+    with open(paras_path, "w") as f:
+        f.write("".join("%d\n" % l for l in paras))
+    with open(idx_path, "w", encoding="utf-8") as f:
+        for label, line, title in lay.index:
+            f.write("%s\t%d\t%s\n" % (label, line, title))
+
+
+main()
+PYEOF
+    mv "$text.tmp" "$text"
+    mv "$index.tmp" "$index"
+    mv "$HPMOR_PARAS.tmp" "$HPMOR_PARAS"
+}
+
+[ -f "$src/hpmor.tex" ] || fetch
+[ -f "$text" ] && [ -f "$index" ] && [ -f "$HPMOR_PARAS" ] || render
+
+# Keep the three most recently used widths.
+touch "$text" "$index" "$HPMOR_PARAS"
+for t in $(ls -t "$state_dir"/text.* | tail -n +4); do
+    w=${t##*.}
+    rm -f "$t" "$state_dir/index.$w" "$state_dir/paras.$w"
+done
+
+case "${1-}" in
+'')
+    para=$(cat "$HPMOR_STATE" 2>/dev/null || true)
+    case $para in '' | *[!0-9]*) para=1 ;; esac
+    line=$(awk -v n="$para" 'NR == n { print; exit }' "$HPMOR_PARAS") ;;
+*[!0-9]*)
+    echo "usage: hpmor [chapter]" >&2; exit 2 ;;
+*)
+    line=$(awk -F'\t' -v c="Chapter $1" '$1 == c { print $2; exit }' "$index")
+    [ -n "$line" ] || { echo "hpmor: no chapter $1" >&2; exit 1; } ;;
+esac
+[ -n "$line" ] || line=1
+
+cat > "$keys" <<'KEYEOF'
+#command
+q       visual ^X^X
+Q       visual ^X^X
+ZZ      visual ^X^X
+^X^X    quit
+KEYEOF
+
+# The last paragraph starting at or above the top line.
+export LESSEDIT='awk -v l=%lt '"'"'$1 <= l { n = NR } END { print n + 0 }'"'"' "$HPMOR_PARAS" > "$HPMOR_STATE" 2>/dev/null'
+
+exec less -R --lesskey-src="$keys" -Ps'HPMOR ?pt%pt\%:.' "+${line}g" "$text"
